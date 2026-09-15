@@ -3,5 +3,5 @@
 <ItemGroup>
 <ProjectReference Include="../../src/PCControlCenter.Core/PCControlCenter.Core.csproj" />
 <ProjectReference Include="../../src/PCControlCenter.Providers.Windows/PCControlCenter.Providers.Windows.csproj" />
-</ItemGroup>
+<ProjectReference Include="../../src/PCControlCenter.Ipc/PCControlCenter.Ipc.csproj"/></ItemGroup>
 </Project>

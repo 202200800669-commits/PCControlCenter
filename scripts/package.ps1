@@ -5,10 +5,13 @@ try {
  $bundle=Join-Path (Get-Location) ('artifacts/pc-control-alpha-'+$stamp)
  dotnet publish src/PCControlCenter.Cli -c Release --no-self-contained -o $bundle
  if($LASTEXITCODE -ne 0){throw 'Publish failed'}
+ dotnet publish src/PCControlCenter.Broker -c Release --no-self-contained -o $bundle
+ if($LASTEXITCODE -ne 0){throw 'Broker publish failed'}
  $usage=@'
-PC Control Center 0.1.0-alpha.1
+PC Control Center 0.1.0-alpha.2
 Windows x64 + .NET 9 Runtime required. This package is framework-dependent.
 Double-click probe.cmd for read-only detection.
+Terminal: pc-control.exe probe --elevated (one-time UAC for fan reads).
 Terminal: pc-control.exe export feedback.zip
 Review diagnostics.json before sharing. Nothing is uploaded automatically.
 Hardware writes are disabled. No new graphical interface or icon is included.

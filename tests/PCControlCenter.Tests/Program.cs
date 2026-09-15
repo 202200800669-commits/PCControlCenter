@@ -1,3 +1,6 @@
+using PCControlCenter.Ipc;
+using System.Buffers.Binary;
+using System.IO.Pipes;
 using PCControlCenter.Core;
 using PCControlCenter.Providers.Windows;
 using System.Text.Json;
@@ -71,6 +74,42 @@ try {
  Check(rejected,"invalid polling interval rejected");
  Check(!Directory.EnumerateFiles(configDir,"*.tmp").Any(),"failed migration leaves no temporary file");
 } finally{foreach(var f in Directory.GetFiles(configDir))File.Delete(f);Directory.Delete(configDir);}
+var validRequest=new BrokerRequest(1,Guid.NewGuid().ToString("N"),"read-fans",device);
+Check(BrokerProtocol.Valid(validRequest),"broker accepts read-only versioned request");
+Check(!BrokerProtocol.Valid(validRequest with {Operation="fan-manual"}),"broker protocol rejects write operations");
+Check(!BrokerProtocol.Valid(validRequest with {Version=2})&&!BrokerProtocol.Valid(validRequest with {RequestId="bad"}),"broker rejects version and request identifier mismatch");
+using(var frame=new MemoryStream()) {
+ await BrokerProtocol.SendAsync(frame,validRequest,default);frame.Position=0;
+ Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(frame,default)==validRequest,"framed protocol round trip");
+}
+foreach(var length in new[]{-1,0,32769}) {
+ var bytes=new byte[4];BinaryPrimitives.WriteInt32LittleEndian(bytes,length);bool rejected=false;
+ try{await BrokerProtocol.ReceiveAsync<BrokerRequest>(new MemoryStream(bytes),default);}catch(InvalidDataException){rejected=true;}
+ Check(rejected,"invalid frame length rejected before allocation");
+}
+using(var frame=new MemoryStream()) {
+ var bytes=System.Text.Encoding.UTF8.GetBytes("""{"Version":1,"RequestId":"id","Operation":"read-fans","Device":null,"Script":"bad"}""");
+ var header=new byte[4];BinaryPrimitives.WriteInt32LittleEndian(header,bytes.Length);frame.Write(header);frame.Write(bytes);frame.Position=0;
+ bool rejected=false;try{await BrokerProtocol.ReceiveAsync<BrokerRequest>(frame,default);}catch(JsonException){rejected=true;}
+ Check(rejected,"arbitrary extra request fields rejected");
+}
+using(var frame=new MemoryStream(new byte[]{12,0,0,0,1})) {
+ bool rejected=false;try{await BrokerProtocol.ReceiveAsync<BrokerRequest>(frame,default);}catch(EndOfStreamException){rejected=true;}
+ Check(rejected,"truncated frame fails closed");
+}
+if(OperatingSystem.IsWindows()) {
+ var name="pc-control-"+Guid.NewGuid().ToString("N");using var server=LocalPipe.Create(name);
+ using var client=new NamedPipeClientStream(".",name,PipeDirection.InOut,PipeOptions.Asynchronous);
+ using var deadline=new CancellationTokenSource(TimeSpan.FromSeconds(3));
+ await Task.WhenAll(server.WaitForConnectionAsync(deadline.Token),client.ConnectAsync(deadline.Token));
+ Check(LocalPipe.ClientIs(server,Environment.ProcessId)&&LocalPipe.ServerIs(client,Environment.ProcessId),"OS peer process identifiers verified");
+ Check(!LocalPipe.ClientIs(server,Environment.ProcessId+1)&&!LocalPipe.ServerIs(client,Environment.ProcessId+1),"wrong peer process identifiers rejected");
+ await BrokerProtocol.SendAsync(server,validRequest,deadline.Token);
+ Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(client,deadline.Token)==validRequest,"real local pipe request round trip");
+ using var cts=new CancellationTokenSource(20);bool cancelled=false;
+ try{await BrokerProtocol.ReceiveAsync<BrokerResponse>(client,cts.Token);}catch(OperationCanceledException){cancelled=true;}
+ Check(cancelled,"stalled pipe read respects cancellation");
+}
 Console.WriteLine($"{passed} tests passed");
 
 sealed class FakeProbe:IReadOnlyProbe {

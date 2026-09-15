@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>WinExe</OutputType><AssemblyName>pc-control-broker</AssemblyName></PropertyGroup><ItemGroup><ProjectReference Include="../PCControlCenter.Ipc/PCControlCenter.Ipc.csproj"/></ItemGroup></Project>
