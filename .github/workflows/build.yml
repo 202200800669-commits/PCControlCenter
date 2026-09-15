@@ -2,15 +2,22 @@ name: Build and simulation tests
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json
       - run: dotnet build PCControlCenter.sln -c Release
+      - run: dotnet format whitespace PCControlCenter.sln --no-restore --verify-no-changes --verbosity quiet
       - run: dotnet run --project tests/PCControlCenter.Tests -c Release --no-build
       - name: Build and validate self-contained development package
         shell: pwsh

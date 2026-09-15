@@ -7,9 +7,10 @@
 - Windows 设备识别、内存占用、电池电量、内屏亮度读取，读取不到时明确标记不可用。
 - ThinkBook 16p G6 IAX / 21R0 / R2CN57WW 的双风扇只读检测，接口不可用时降级。
 - 华硕、机械革命品牌分流与扩展位置；尚无这两个品牌的专用控制功能。
-- 可选一次性 UAC 权限代理，仅处理已匹配 ThinkBook 的风扇读取，完成后退出。
+- 可选一次性 UAC 权限代理，处理已匹配 ThinkBook 的风扇读取与显式限时试运行，完成后退出。
 - 诊断包含 Windows 版本、主板产品、CPU 与显卡驱动版本，不包含设备序列号。
 - 本地诊断预览和 ZIP 导出，不自动上传，不采集序列号、主机名和网络标识。
+- 连续只读监控 `watch 3`、反馈包检查、带冲突检测与备份恢复的非硬件配置核心。
 - 已验证参考 ThinkBook 可显式执行 5–30 秒风扇试运行；结束后发送恢复自动命令。其他型号没有写入入口，现有独立控制台继续保留。
 
 ## 构建和运行
@@ -61,3 +62,5 @@ dotnet run --project src/PCControlCenter.Cli -c Release -- import-preferences ol
 若恢复结果为 `UNCONFIRMED`，先执行 `fans auto` 并核对；程序不能保证系统崩溃或整个进程树被结束后的恢复。断开后原客户端无法接收最终恢复回执，需重新读取。此功能仍标记为实验，常驻控制及温控曲线尚未启用。
 
 收到其他人的报告后，可运行 `pc-control.exe inspect-report feedback.zip` 安全检查，不会启用任何控制功能。详见 [试点反馈流程](docs/feedback-workflow.md)。
+
+连续监控和配置接口见 [监控接口](docs/monitoring.md)、[配置生命周期](docs/preferences.md)。最新回归证据与待办见 [阶段进度](docs/stage-one-status.md)；此前版本的实机测试不能替代当前版本验证。
