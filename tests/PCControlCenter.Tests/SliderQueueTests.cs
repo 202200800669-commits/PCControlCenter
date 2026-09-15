@@ -61,5 +61,20 @@ static class SliderQueueTests
             closingProvider.Release.TrySetResult();
             await closingQueue.DisposeAsync();
         }
+        var interruptedProvider = new Writer(identity);
+        await using var interruptedQueue = new LatestControlQueue(new Controller(interruptedProvider, identity), Feature.FanControl, TimeSpan.Zero);
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            var active = interruptedQueue.SubmitAsync(2500, cancellation.Token);
+            await interruptedProvider.Started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            cancellation.Cancel();
+            check((await active.WaitAsync(TimeSpan.FromSeconds(3))).Code == ResultCode.UnknownOutcome,
+                "slider preserves unknown outcome when cancellation interrupts an active write");
+        }
+        finally
+        {
+            interruptedProvider.Release.TrySetResult();
+        }
     }
 }
