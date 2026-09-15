@@ -31,10 +31,12 @@ static class FanWorkerTests {
  function Start-Sleep {param([int]$Milliseconds) [Threading.Thread]::Sleep(5)}
  """;
  private sealed record Scenario(string Mode,int FailAt,bool WrongModel=false,bool Disconnect=false);
- private static async Task<(JsonElement Receipt,JsonElement Writes)> RunAsync(Scenario s) {
+ private static async Task<(JsonElement Receipt,JsonElement Writes)> RunAsync(Scenario s,string? mutexName=null) {
   using var source=typeof(FanSessionRunner).Assembly.GetManifestResourceStream("PCControlCenter.Providers.Windows.FanSession.ps1")!;
   using var reader=new StreamReader(source);var script=await reader.ReadToEndAsync();
-  script=script.Replace(@"Global\PCControlCenter.ThinkBookFanSession","Local\\PCControlCenter.Test."+Guid.NewGuid().ToString("N"));
+  const string productionMutex=@"Global\PCControlCenter.ThinkBookFanSession";
+  if(!script.Contains(productionMutex))throw new Exception("Worker mutex changed; test isolation must be reviewed");
+  script=script.Replace(productionMutex,mutexName??"Local\\PCControlCenter.Test."+Guid.NewGuid().ToString("N"));
   var prefix=$"$mode='{s.Mode}';$rpm1={(s.Mode=="manual"?3500:0)};$rpm2={(s.Mode=="manual"?4500:0)};$seconds={(s.Mode=="manual"?5:0)};$failAt={s.FailAt};$wrongModel=${s.WrongModel};$signal=${s.Disconnect};";
   var body=prefix+MockHardware+"\n"+script+"\nConvertTo-Json -InputObject @($script:writes.ToArray()) -Compress";
   var start=new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),@"System32\WindowsPowerShell\v1.0\powershell.exe")){UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true,StandardOutputEncoding=Encoding.UTF8};
@@ -72,5 +74,18 @@ static class FanWorkerTests {
   }
   var disconnected=await RunAsync(new("manual",0,Disconnect:true));
   check(disconnected.Receipt.GetProperty("Code").GetString()=="INTERRUPTED"&&disconnected.Receipt.GetProperty("Recovery").GetString()=="AUTO_COMMANDS_SENT_OVERRIDE_OFF","stdin disconnect runs real worker recovery finally");
+  var name="Local\\PCControlCenter.Test."+Guid.NewGuid().ToString("N");
+  using var acquired=new ManualResetEventSlim();using var release=new ManualResetEventSlim();
+  Exception? holderError=null;
+  var holder=new Thread(()=>{
+   try{using var mutex=new Mutex(false,name);mutex.WaitOne();try{acquired.Set();release.Wait();}finally{mutex.ReleaseMutex();}}
+   catch(Exception e){holderError=e;acquired.Set();}
+  });
+  holder.Start();
+  try {
+   if(!acquired.Wait(TimeSpan.FromSeconds(5))||holderError is not null)throw new Exception("Test mutex acquisition failed",holderError);
+   var busy=await RunAsync(new("auto",0),name);
+   check(busy.Receipt.GetProperty("Code").GetString()=="BUSY"&&busy.Writes.GetArrayLength()==0,"occupied cross-process mutex causes zero hardware writes");
+  }finally{release.Set();holder.Join();}
  }
 }

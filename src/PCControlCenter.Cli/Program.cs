@@ -4,7 +4,7 @@ using PCControlCenter.Core;
 using PCControlCenter.Providers.Windows;
 Console.OutputEncoding=Encoding.UTF8;
 if(args.Length==0||args is ["--help"]){
- Console.WriteLine("PC Control Center 0.1.0-alpha.7\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");return 0;
+ Console.WriteLine("PC Control Center 0.1.0-alpha.8\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");return 0;
 }
 if(args is ["inspect-report",var reportFile]) {
  try{Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Feedback.Inspect(reportFile),Diagnostics.Json));return 0;}
@@ -47,7 +47,10 @@ try {
  }
  var snapshot=await provider.ReadAsync(device,cancellation.Token);
  if(args[0]=="probe")Console.WriteLine(Diagnostics.ToJson(snapshot));
- else {Diagnostics.Export(snapshot,Path.GetFullPath(args[1]));Console.WriteLine("已导出。提交前请打开 diagnostics.json 核对内容；程序不会自动上传。");}
+ else {
+  Diagnostics.Export(snapshot,Path.GetFullPath(args[1]));
+  Console.WriteLine(snapshot.IssueCodes.Count==0?"诊断已导出。":"诊断已导出，未完成项："+string.Join(", ",snapshot.IssueCodes));
+ }
  return 0;
 } catch(OperationCanceledException){if(watchSeconds is not null)return 0;Console.Error.WriteLine("请求取消或超时；若试运行已开始，代理会尝试恢复自动散热，结果需重新核对。");return 4;}
 catch(ProbeException e){Console.Error.WriteLine("代理错误码："+e.Code);return 10;}

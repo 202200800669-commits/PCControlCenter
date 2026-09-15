@@ -31,7 +31,7 @@ try {
  if($l[0].FanId.Count -ne 2 -or $l[0].FanId[0] -ne 1 -or $l[0].FanId[1] -ne 2 -or $l[0].FanMinSpeed.Count -ne 2 -or $l[0].FanMaxSpeed.Count -ne 2){throw 'LIMITS_CHANGED'}
  for($i=0;$i -lt 2;$i++){if($l[0].FanMinSpeed[$i] -ne 1500 -or $l[0].FanMaxSpeed[$i] -ne 5500){throw 'LIMITS_CHANGED'}}
  $script:fan=$a[0]
- $mutex=New-Object Threading.Mutex($false,'GlobalPCControlCenter.ThinkBookFanSession')
+ $mutex=New-Object Threading.Mutex($false,'Global\PCControlCenter.ThinkBookFanSession')
  try{$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
  if(!$locked){$result.Code='BUSY';throw 'BUSY'}
  if($stop.IsCompleted){$result.Code='CANCELLED_BEFORE_WRITE';throw 'CANCELLED'}

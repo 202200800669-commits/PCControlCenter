@@ -96,6 +96,14 @@ var validRequest=new BrokerRequest(BrokerProtocol.Version,Guid.NewGuid().ToStrin
 Check(BrokerProtocol.Valid(validRequest),"broker accepts read-only versioned request");
 Check(!BrokerProtocol.Valid(validRequest with {Operation="fan-manual"}),"broker rejects untyped write operation");
 Check(!BrokerProtocol.Valid(validRequest with {Version=99})&&!BrokerProtocol.Valid(validRequest with {RequestId="bad"}),"broker rejects version and request identifier mismatch");
+foreach(var invalidIdentity in new[]{device with {Model=null!},device with {Bios=""},device with {Product=new string('x',161)},device with {Manufacturer="LENOVO\n"}})
+ Check(!BrokerProtocol.Valid(validRequest with {Device=invalidIdentity}),"broker rejects incomplete or malformed identity before elevation");
+var validWire=JsonSerializer.Serialize(validRequest,BrokerProtocol.Json);
+foreach(var invalidWire in new[]{validWire.Replace("\"Version\":2","\"Version\":1,\"Version\":2"),validWire.Replace("\"Operation\":\"read-fans\",",""),validWire.Replace("\"Manufacturer\":\"LENOVO\"","\"Manufacturer\":null")}) {
+ using var malformed=new MemoryStream();var payload=System.Text.Encoding.UTF8.GetBytes(invalidWire);var header=new byte[4];BinaryPrimitives.WriteInt32LittleEndian(header,payload.Length);malformed.Write(header);malformed.Write(payload);malformed.Position=0;
+ bool rejected=false;try{await BrokerProtocol.ReceiveAsync<BrokerRequest>(malformed,default);}catch(JsonException){rejected=true;}
+ Check(rejected,"broker rejects duplicate missing or null required fields");
+}
 using(var frame=new MemoryStream()) {
  await BrokerProtocol.SendAsync(frame,validRequest,default);frame.Position=0;
  Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(frame,default)==validRequest,"framed protocol round trip");

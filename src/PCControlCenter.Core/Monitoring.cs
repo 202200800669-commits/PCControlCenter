@@ -16,6 +16,7 @@ public sealed class MonitorSession {
    while(true) {
     ct.ThrowIfCancellationRequested();
     var snapshot=await provider.ReadAsync(identity,ct);
+    ct.ThrowIfCancellationRequested();
     if(snapshot.Device!=identity)throw new InvalidOperationException("MONITOR_IDENTITY_CHANGED");
     yield return snapshot;
     // Delay starts after the consumer accepts this sample. Slow hardware or UI
