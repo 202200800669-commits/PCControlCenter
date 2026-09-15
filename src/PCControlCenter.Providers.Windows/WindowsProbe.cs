@@ -106,6 +106,7 @@ public sealed class WindowsProbe : IReadOnlyProbe
             {
                 var node = JsonNode.Parse(text) ?? throw new IOException("INVALID_PROBE_JSON");
                 node["displays"] = InstalledDisplayDrivers();
+                node["gpuTelemetry"] = JsonSerializer.SerializeToNode(await NvidiaTelemetry.ReadAsync(ct));
                 text = node.ToJsonString();
             }
             using var json = JsonDocument.Parse(text);

@@ -1,6 +1,6 @@
 # 下一轮开发入口
 
-当前为 alpha.9。先阅读阶段进度、架构和发布门槛，再运行 scripts/verify.ps1。本机便携 .NET 10 SDK 在 local/dotnet10；旧 ThinkBook 控制中心保留原位，不要以新 CLI 覆盖它。图标与布局等待负责人提供 Figma。
+当前为 alpha.10。先阅读阶段进度、架构和发布门槛，再运行 scripts/verify.ps1。本机便携 .NET 10 SDK 在 local/dotnet10；旧 ThinkBook 控制中心保留原位，不要以新 CLI 覆盖它。图标与布局等待负责人提供 Figma。
 
 ## 优先处理
 

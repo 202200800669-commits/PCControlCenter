@@ -20,7 +20,7 @@ public static class Diagnostics
     public static object Report(Snapshot s) => new
     {
         schemaVersion = 2,
-        applicationVersion = "0.1.0-alpha.9",
+        applicationVersion = "0.1.0-alpha.10",
         capturedAt = DateTimeOffset.UtcNow,
         provider = s.Provider,
         device = new

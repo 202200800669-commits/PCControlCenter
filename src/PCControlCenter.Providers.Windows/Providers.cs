@@ -28,11 +28,31 @@ public class GenericProvider(IReadOnlyProbe probe) : IHardwareProvider
                     value = v;
                 readings.Add(new(feature, key, value, "%", DateTimeOffset.UtcNow, value is null ? "unavailable" : "ok"));
             }
+            if (data.TryGetProperty("gpuTelemetry", out var telemetry) && telemetry.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var gpu in telemetry.EnumerateArray().Take(8))
+                {
+                    var index = gpu.GetProperty("Index").GetInt32();
+                    if (index is < 0 or > 255)
+                        continue;
+                    foreach (var (key, feature, unit, min, max) in new[] {
+                        ("Temperature", Feature.GpuTemperature, "°C", -50d, 150d),
+                        ("Utilization", Feature.GpuUtilization, "%", 0d, 100d),
+                        ("Power", Feature.GpuPower, "W", 0d, 2000d) })
+                    {
+                        double? value = null;
+                        var item = gpu.GetProperty(key);
+                        if (item.ValueKind == System.Text.Json.JsonValueKind.Number && item.TryGetDouble(out var number) && double.IsFinite(number) && number >= min && number <= max)
+                            value = number;
+                        readings.Add(new(feature, "nvidia-" + index, value, unit, DateTimeOffset.UtcNow, value is null ? "unavailable" : "ok"));
+                    }
+                }
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { codes.Add("GENERIC_PROBE_FAILED"); }
         var caps = new List<Capability> { new(Feature.DeviceInfo, SupportLevel.ReadOnly, false, "") };
-        caps.AddRange(readings.Where(r => r.Value is not null).Select(r => new Capability(r.Feature, SupportLevel.ReadOnly, false, r.Unit)));
+        caps.AddRange(readings.Where(r => r.Value is not null).Select(r => new Capability(r.Feature, SupportLevel.ReadOnly, false, r.Unit)).DistinctBy(c => c.Feature));
         foreach (var f in Enum.GetValues<Feature>().Where(f => caps.All(c => c.Feature != f)))
             caps.Add(new(f, SupportLevel.Unsupported, false, "", Reason: "No verified adapter"));
         return new(Id, device, caps, readings, codes, system);

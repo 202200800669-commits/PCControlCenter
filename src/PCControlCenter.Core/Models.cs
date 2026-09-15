@@ -6,7 +6,7 @@ public enum SupportLevel
 }
 public enum Feature
 {
-    DeviceInfo, Memory, Battery, Brightness, FanRpm, FanControl, FanTrial, PerformanceMode, CpuPower, Charging, Keyboard, GraphicsMode
+    DeviceInfo, Memory, Battery, Brightness, FanRpm, FanControl, FanTrial, PerformanceMode, CpuPower, Charging, Keyboard, GraphicsMode, GpuTemperature, GpuUtilization, GpuPower
 }
 public enum ResultCode
 {

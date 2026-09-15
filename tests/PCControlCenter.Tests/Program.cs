@@ -394,6 +394,7 @@ await using (var mismatched = monitor.WatchAsync().GetAsyncEnumerator())
     Check(rejected, "monitor rejects changed identity before emitting sample");
 }
 await SliderQueueTests.RunAsync(device, Check);
+await GpuTests.RunAsync(device, Check);
 Console.WriteLine($"{passed} tests passed");
 
 sealed class FakeProbe : IReadOnlyProbe
