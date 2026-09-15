@@ -393,6 +393,7 @@ await using (var mismatched = monitor.WatchAsync().GetAsyncEnumerator())
     catch (InvalidOperationException) { rejected = true; }
     Check(rejected, "monitor rejects changed identity before emitting sample");
 }
+await SliderQueueTests.RunAsync(device, Check);
 Console.WriteLine($"{passed} tests passed");
 
 sealed class FakeProbe : IReadOnlyProbe
