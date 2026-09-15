@@ -4,12 +4,12 @@ using System.Text.Json.Serialization;
 using PCControlCenter.Core;
 namespace PCControlCenter.Ipc;
 
-public sealed record BrokerRequest(int Version,string RequestId,string Operation,DeviceIdentity Device);
-public sealed record BrokerResponse(int Version,string RequestId,string Code,int? Fan1=null,int? Fan2=null);
+public sealed record BrokerRequest(int Version,string RequestId,string Operation,DeviceIdentity Device,FanTrial? Trial=null);
+public sealed record BrokerResponse(int Version,string RequestId,string Code,int? Fan1=null,int? Fan2=null,FanReceipt? Receipt=null);
 public static class BrokerProtocol {
- public const int Version=1,MaxFrame=32768;
+ public const int Version=2,MaxFrame=32768;
  public static JsonSerializerOptions Json {get;}=new(){UnmappedMemberHandling=JsonUnmappedMemberHandling.Disallow};
- public static bool Valid(BrokerRequest q)=>q.Version==Version&&Guid.TryParseExact(q.RequestId,"N",out _)&&q.Operation=="read-fans"&&q.Device is not null;
+ public static bool Valid(BrokerRequest q)=>q.Version==Version&&Guid.TryParseExact(q.RequestId,"N",out _)&&q.Device is not null && (q.Operation=="read-fans"&&q.Trial is null || q.Operation=="fan-trial"&&q.Trial is {IsValid:true});
  public static async Task SendAsync<T>(Stream stream,T value,CancellationToken ct) {
   var bytes=JsonSerializer.SerializeToUtf8Bytes(value,Json);
   if(bytes.Length is <1 or >MaxFrame)throw new InvalidDataException("FRAME_SIZE");

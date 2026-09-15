@@ -39,7 +39,7 @@ public sealed class ThinkBookProvider(IReadOnlyProbe probe) : GenericProvider(pr
     var v=data.GetProperty(key).GetInt32();if(v<0||v>10000)throw new IOException("INVALID_READING");
     readings.Add(new(Feature.FanRpm,key,v,"RPM",DateTimeOffset.UtcNow,"ok"));
    }
-   return snapshot with {Readings=readings,Capabilities=snapshot.Capabilities.Select(c=>c.Feature==Feature.FanRpm?new Capability(Feature.FanRpm,SupportLevel.ReadOnly,false,"RPM"):c).ToArray()};
+   return snapshot with {Readings=readings,Capabilities=snapshot.Capabilities.Select(c=>c.Feature switch {Feature.FanRpm=>new Capability(Feature.FanRpm,SupportLevel.ReadOnly,false,"RPM"),Feature.FanTrial=>new Capability(Feature.FanTrial,SupportLevel.Experimental,true,"RPM",1500,5500,"Explicit UAC; maximum 30 seconds; restores auto commands"),_=>c}).ToArray()};
   } catch(OperationCanceledException){throw;}catch(ProbeException e){var code=e.Code switch {"ACCESS_DENIED"=>"THINKBOOK_FAN_ACCESS_DENIED","ELEVATION_CANCELLED"=>"ELEVATION_CANCELLED","BROKER_NOT_INSTALLED"=>"BROKER_NOT_INSTALLED",_=>"BROKER_READ_UNAVAILABLE"};return snapshot with {IssueCodes=[..snapshot.IssueCodes,code]};}catch(Exception){return snapshot with {IssueCodes=[..snapshot.IssueCodes,"THINKBOOK_FAN_READ_UNAVAILABLE"]};}
  }
 }

@@ -8,13 +8,15 @@ try {
  dotnet publish src/PCControlCenter.Broker -c Release --no-self-contained -o $bundle
  if($LASTEXITCODE -ne 0){throw 'Broker publish failed'}
  $usage=@'
-PC Control Center 0.1.0-alpha.2
+PC Control Center 0.1.0-alpha.3
 Windows x64 + .NET 9 Runtime required. This package is framework-dependent.
 Double-click probe.cmd for read-only detection.
 Terminal: pc-control.exe probe --elevated (one-time UAC for fan reads).
 Terminal: pc-control.exe export feedback.zip
 Review diagnostics.json before sharing. Nothing is uploaded automatically.
-Hardware writes are disabled. No new graphical interface or icon is included.
+Experimental reference ThinkBook only: fans manual 3500 4500 12
+Trial restores firmware auto commands after expiry or disconnect.
+No persistent hardware control or new graphical interface/icon is included.
 This is a local development package; publication and licensing review are pending.
 '@
  [IO.File]::WriteAllText((Join-Path $bundle 'USAGE.txt'),$usage,[Text.Encoding]::UTF8)

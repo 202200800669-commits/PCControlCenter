@@ -20,8 +20,9 @@ var ambiguous=new ProviderRegistry([new ThinkBookProvider(probe),new ThinkBookPr
 Check(ambiguous.Resolve(device).Id=="windows.generic","ambiguous matching fails closed");
 var realProvider=registry.Resolve(device);var snap=await realProvider.ReadAsync(device,default);
 Check(snap.Readings.Count(r=>r.Feature==Feature.FanRpm)==2,"fan readings mapped");
-Check(snap.Capabilities.All(c=>!c.CanWrite),"milestone advertises no hardware writes");
-Check((await new Controller(realProvider,device).ApplyAsync(new(Feature.FanControl,3000))).Code==ResultCode.Unsupported,"real provider rejects writes");
+Check(snap.Capabilities.Any(c=>c.Feature==Feature.FanTrial&&c.Level==SupportLevel.Experimental&&c.CanWrite),"bounded fan trial explicitly marked experimental");
+Check(snap.Capabilities.Where(c=>c.Feature!=Feature.FanTrial).All(c=>!c.CanWrite),"monitoring providers advertise no persistent writes");
+Check((await new Controller(realProvider,device).ApplyAsync(new(Feature.FanControl,3000))).Code==ResultCode.Unsupported,"generic controller rejects persistent writes");
 probe.FailFans=true;var degraded=await realProvider.ReadAsync(device,default);
 Check(degraded.IssueCodes.Contains("THINKBOOK_FAN_READ_UNAVAILABLE")&&degraded.Readings.All(r=>r.Feature!=Feature.FanRpm),"failed fan read has no fabricated values");
 probe.FailFans=false;probe.BadFans=true;degraded=await realProvider.ReadAsync(device,default);
@@ -74,10 +75,10 @@ try {
  Check(rejected,"invalid polling interval rejected");
  Check(!Directory.EnumerateFiles(configDir,"*.tmp").Any(),"failed migration leaves no temporary file");
 } finally{foreach(var f in Directory.GetFiles(configDir))File.Delete(f);Directory.Delete(configDir);}
-var validRequest=new BrokerRequest(1,Guid.NewGuid().ToString("N"),"read-fans",device);
+var validRequest=new BrokerRequest(BrokerProtocol.Version,Guid.NewGuid().ToString("N"),"read-fans",device);
 Check(BrokerProtocol.Valid(validRequest),"broker accepts read-only versioned request");
-Check(!BrokerProtocol.Valid(validRequest with {Operation="fan-manual"}),"broker protocol rejects write operations");
-Check(!BrokerProtocol.Valid(validRequest with {Version=2})&&!BrokerProtocol.Valid(validRequest with {RequestId="bad"}),"broker rejects version and request identifier mismatch");
+Check(!BrokerProtocol.Valid(validRequest with {Operation="fan-manual"}),"broker rejects untyped write operation");
+Check(!BrokerProtocol.Valid(validRequest with {Version=99})&&!BrokerProtocol.Valid(validRequest with {RequestId="bad"}),"broker rejects version and request identifier mismatch");
 using(var frame=new MemoryStream()) {
  await BrokerProtocol.SendAsync(frame,validRequest,default);frame.Position=0;
  Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(frame,default)==validRequest,"framed protocol round trip");
@@ -110,6 +111,18 @@ if(OperatingSystem.IsWindows()) {
  try{await BrokerProtocol.ReceiveAsync<BrokerResponse>(client,cts.Token);}catch(OperationCanceledException){cancelled=true;}
  Check(cancelled,"stalled pipe read respects cancellation");
 }
+foreach(var trial in new[]{new FanTrial("manual",3500,4500,12),new FanTrial("full",0,0,5),new FanTrial("auto",0,0,0)}) {
+ Check(trial.IsValid&&BrokerProtocol.Valid(validRequest with {Operation="fan-trial",Trial=trial}),"typed bounded fan request accepted");
+ using var trialFrame=new MemoryStream();var q=validRequest with {Operation="fan-trial",Trial=trial};
+ await BrokerProtocol.SendAsync(trialFrame,q,default);trialFrame.Position=0;
+ Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(trialFrame,default)==q,"fan trial frame round trip");
+}
+foreach(var trial in new[]{new FanTrial("manual",1499,4500,12),new FanTrial("manual",3500,5501,12),new FanTrial("manual",3500,4500,31),new FanTrial("manual",3500,4500,0),new FanTrial("full",100,0,5),new FanTrial("auto",0,0,10),new FanTrial("raw",0,0,5)}) {
+ Check(!trial.IsValid&&!BrokerProtocol.Valid(validRequest with {Operation="fan-trial",Trial=trial}),"unsafe or unbounded fan request rejected");
+}
+Check(!BrokerProtocol.Valid(validRequest with {Operation="fan-trial"}),"fan request requires typed settings");
+Check(!BrokerProtocol.Valid(validRequest with {Trial=new("auto",0,0,0)}),"read request cannot smuggle fan settings");
+Check((await FanSessionRunner.RunAsync(new("raw",0,0,0),default)).Code=="INVALID_REQUEST","invalid worker request never starts a process");
 Console.WriteLine($"{passed} tests passed");
 
 sealed class FakeProbe:IReadOnlyProbe {

@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 <ItemGroup>
 <ProjectReference Include="../PCControlCenter.Core/PCControlCenter.Core.csproj" />
-</ItemGroup>
+<EmbeddedResource Include="FanSession.ps1" /></ItemGroup>
 </Project>

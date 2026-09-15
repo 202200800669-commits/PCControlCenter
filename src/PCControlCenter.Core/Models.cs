@@ -1,7 +1,7 @@
 namespace PCControlCenter.Core;
 
 public enum SupportLevel { Unsupported, ReadOnly, Experimental, Verified }
-public enum Feature { DeviceInfo, Memory, Battery, Brightness, FanRpm, FanControl, PerformanceMode, CpuPower, Charging, Keyboard, GraphicsMode }
+public enum Feature { DeviceInfo, Memory, Battery, Brightness, FanRpm, FanControl, FanTrial, PerformanceMode, CpuPower, Charging, Keyboard, GraphicsMode }
 public enum ResultCode { Success, Unsupported, InvalidRequest, Cancelled, Timeout, Unavailable, UnknownOutcome }
 public sealed record DeviceIdentity(string Manufacturer, string Product, string Model, string Bios, string Platform);
 public sealed record Capability(Feature Feature, SupportLevel Level, bool CanWrite, string Unit, double? Min = null, double? Max = null, string? Reason = null);
