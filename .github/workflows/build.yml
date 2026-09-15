@@ -17,6 +17,7 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet build PCControlCenter.sln -c Release
+      - run: ./scripts/verify-source.ps1
       - run: dotnet format whitespace PCControlCenter.sln --no-restore --verify-no-changes --verbosity quiet
       - run: dotnet run --project tests/PCControlCenter.Tests -c Release --no-build
       - name: Build and validate self-contained development package

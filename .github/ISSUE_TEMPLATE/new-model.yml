@@ -3,6 +3,13 @@ description: 提交型号与只读检测结果
 title: "[适配] 品牌 型号"
 body:
   - type: input
+    id: application
+    attributes:
+      label: 程序版本与构建提交
+      description: 程序版本见诊断包；构建提交见 BUILD.json 的 sourceCommit。
+    validations:
+      required: true
+  - type: input
     id: model
     attributes:
       label: 品牌和完整型号
@@ -24,3 +31,14 @@ body:
     id: requested
     attributes:
       label: 希望支持的功能及官方控制工具名称
+  - type: dropdown
+    id: privilege
+    attributes:
+      label: 本次读取权限
+      options:
+        - 普通权限
+        - 通过 UAC 的同账户管理员权限
+        - UAC 已取消或未完成
+        - 不确定
+    validations:
+      required: true
