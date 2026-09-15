@@ -20,6 +20,7 @@ var ambiguous=new ProviderRegistry([new ThinkBookProvider(probe),new ThinkBookPr
 Check(ambiguous.Resolve(device).Id=="windows.generic","ambiguous matching fails closed");
 var realProvider=registry.Resolve(device);var snap=await realProvider.ReadAsync(device,default);
 Check(snap.Readings.Count(r=>r.Feature==Feature.FanRpm)==2,"fan readings mapped");
+Check(snap.Readings.Single(r=>r.Feature==Feature.PerformanceMode).Value==0&&snap.Capabilities.Single(c=>c.Feature==Feature.PerformanceMode).Level==SupportLevel.ReadOnly,"performance mode read is separate from control capability");
 Check(snap.Capabilities.Any(c=>c.Feature==Feature.FanTrial&&c.Level==SupportLevel.Experimental&&c.CanWrite),"bounded fan trial explicitly marked experimental");
 Check(snap.Capabilities.Where(c=>c.Feature!=Feature.FanTrial).All(c=>!c.CanWrite),"monitoring providers advertise no persistent writes");
 Check((await new Controller(realProvider,device).ApplyAsync(new(Feature.FanControl,3000))).Code==ResultCode.Unsupported,"generic controller rejects persistent writes");
@@ -127,6 +128,30 @@ Check(PublicText.Clean("\nhello\r\t")=="hello"&&PublicText.Clean(new string('x',
 using(var report=JsonDocument.Parse(Diagnostics.ToJson(snap with {System=new("10.0","26100","CPU","Maker","Board",[new("GPU","32.0.1")])}))) {
  Check(report.RootElement.GetProperty("schemaVersion").GetInt32()==2&&report.RootElement.GetProperty("system").GetProperty("Displays")[0].GetProperty("DriverVersion").GetString()=="32.0.1","diagnostic schema includes selected platform and driver fields");
 }
+var reportPath=Path.Combine(Path.GetTempPath(),Guid.NewGuid()+".zip");
+void WriteReport(string content,string name="diagnostics.json") {
+ if(File.Exists(reportPath))File.Delete(reportPath);
+ using var archive=ZipFile.Open(reportPath,ZipArchiveMode.Create);using var writer=new StreamWriter(archive.CreateEntry(name).Open());writer.Write(content);
+}
+try {
+ WriteReport(Diagnostics.ToJson(snap));var summary=Feedback.Inspect(reportPath);
+ Check(summary.ReportedDevice==device&&summary.Trust=="UserReportedUnverified","feedback stays untrusted even for known model");
+ WriteReport(Diagnostics.ToJson(snap with {System=new("10.0","26100","CPU","Maker","Board",[new("GPU","32.0.1","InstalledDriverRegistry")])}));
+ Check(Feedback.Inspect(reportPath).ReportedSystem?.Displays[0] is {DriverVersion:"32.0.1",Source:"InstalledDriverRegistry"},"feedback retains bounded driver details and provenance");
+ WriteReport(Diagnostics.ToJson(snap).Replace("\"schemaVersion\": 2","\"schemaVersion\": 1"));
+ Check(Feedback.Inspect(reportPath) is {SchemaVersion:1,ReportedSystem:null},"legacy feedback remains readable without invented system details");
+ var firstKey=summary.CompatibilityKey;WriteReport(Diagnostics.ToJson(snap with {Device=device with {Bios="Other"}}));
+ Check(Feedback.Inspect(reportPath).CompatibilityKey!=firstKey,"firmware changes produce separate compatibility group");
+ foreach(var invalid in new[]{Diagnostics.ToJson(snap).Replace("\"schemaVersion\": 2","\"schemaVersion\": 99"),"{\"schemaVersion\":2,\"schemaVersion\":1}",new string('x',262145)}) {
+  WriteReport(invalid);bool rejected=false;try{Feedback.Inspect(reportPath);}catch(Exception){rejected=true;}
+  Check(rejected,"unsupported duplicate or oversized feedback rejected");
+ }
+ WriteReport(Diagnostics.ToJson(snap),"../../unexpected.json");bool badEntry=false;try{Feedback.Inspect(reportPath);}catch(InvalidDataException){badEntry=true;}
+ Check(badEntry,"path traversal archive entry rejected without extraction");
+ WriteReport(Diagnostics.ToJson(snap));using(var archive=ZipFile.Open(reportPath,ZipArchiveMode.Update)){archive.CreateEntry("tool.exe");}
+ badEntry=false;try{Feedback.Inspect(reportPath);}catch(InvalidDataException){badEntry=true;}
+ Check(badEntry,"extra executable entry rejected without execution");
+}finally{if(File.Exists(reportPath))File.Delete(reportPath);}
 await FanWorkerTests.RunAllAsync(Check);
 Console.WriteLine($"{passed} tests passed");
 
@@ -134,6 +159,7 @@ sealed class FakeProbe:IReadOnlyProbe {
  public bool FailFans, BadFans, Denied, BadGeneric;
  public Task<JsonElement> QueryAsync(ProbeKind kind,CancellationToken ct){
   ct.ThrowIfCancellationRequested();
+  if(kind==ProbeKind.ThinkBookMode)return Task.FromResult(JsonDocument.Parse("""{"mode":0,"serviceVersion":8193}""").RootElement.Clone());
   if(kind==ProbeKind.ThinkBookFans&&Denied)throw new ProbeException("ACCESS_DENIED");
   if(kind==ProbeKind.Generic&&BadGeneric)return Task.FromResult(JsonDocument.Parse("""{"memory":101,"battery":-1,"brightness":null}""").RootElement.Clone());
   if(kind==ProbeKind.ThinkBookFans&&FailFans)throw new IOException("secret path");

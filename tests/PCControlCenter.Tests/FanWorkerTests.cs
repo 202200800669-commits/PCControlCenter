@@ -8,7 +8,7 @@ static class FanWorkerTests {
  $script:writes=New-Object Collections.Generic.List[object]
  $script:values=@{[uint32]0x04020000=0;[uint32]0x04030001=2500;[uint32]0x04030002=2300}
  function Get-CimInstance {
-  param([string]$ClassName,[string]$Namespace,[int]$OperationTimeoutSec)
+  param([string]$ClassName,[string]$Namespace,[int]$OperationTimeoutSec,[string[]]$Property)
   switch($ClassName) {
    'Win32_ComputerSystem' {if($wrongModel){return [pscustomobject]@{Manufacturer='OTHER'}};return [pscustomobject]@{Manufacturer='LENOVO'}}
    'Win32_ComputerSystemProduct' {return [pscustomobject]@{Name='21R0';Version='ThinkBook 16p G6 IAX'}}

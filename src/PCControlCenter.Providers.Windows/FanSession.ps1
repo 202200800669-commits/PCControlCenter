@@ -21,9 +21,9 @@ try {
  if($mode -eq 'manual' -and ($rpm1 -lt 1500 -or $rpm1 -gt 5500 -or $rpm2 -lt 1500 -or $rpm2 -gt 5500)){throw 'INVALID_RPM'}
  if($mode -ne 'manual' -and ($rpm1 -ne 0 -or $rpm2 -ne 0)){throw 'INVALID_RPM'}
  if(($mode -eq 'auto' -and $seconds -ne 0) -or ($mode -ne 'auto' -and ($seconds -lt 5 -or $seconds -gt 30))){throw 'INVALID_LEASE'}
- $c=Get-CimInstance Win32_ComputerSystem -OperationTimeoutSec 3
- $p=Get-CimInstance Win32_ComputerSystemProduct -OperationTimeoutSec 3
- $b=Get-CimInstance Win32_BIOS -OperationTimeoutSec 3
+ $c=Get-CimInstance Win32_ComputerSystem -Property Manufacturer -OperationTimeoutSec 3
+ $p=Get-CimInstance Win32_ComputerSystemProduct -Property Name,Version -OperationTimeoutSec 3
+ $b=Get-CimInstance Win32_BIOS -Property SMBIOSBIOSVersion -OperationTimeoutSec 3
  if($c.Manufacturer -ne 'LENOVO' -or $p.Name -ne '21R0' -or $p.Version -ne 'ThinkBook 16p G6 IAX' -or $b.SMBIOSBIOSVersion -ne 'R2CN57WW'){throw 'IDENTITY_MISMATCH'}
  $a=@(Get-CimInstance -Namespace root/wmi -ClassName LENOVO_OTHER_METHOD -OperationTimeoutSec 3|Where-Object Active)
  $l=@(Get-CimInstance -Namespace root/wmi -ClassName LENOVO_FAN_TEST_DATA -OperationTimeoutSec 3|Where-Object Active)

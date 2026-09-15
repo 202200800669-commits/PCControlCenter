@@ -1,6 +1,6 @@
 # PC Control Center
 
-多品牌 Windows 电脑控制中心。当前版本为 **0.1.0-alpha.4 架构与限时风扇试运行里程碑**，不是完整硬件控制发行版。
+多品牌 Windows 电脑控制中心。当前版本为 **0.1.0-alpha.5 架构与限时风扇试运行里程碑**，不是完整硬件控制发行版。
 
 ## 当前可用
 
@@ -59,3 +59,5 @@ dotnet run --project src/PCControlCenter.Cli -c Release -- import-preferences ol
 手动转速范围为 1500–5500 RPM，试运行时限 5–30 秒；到期、Ctrl+C 或前端断开均触发恢复路径。不要在试验期间用其他软件或热键同时改散热模式。输出区分实际转速、目标是否到达、以及恢复命令发送结果。`AUTO_COMMANDS_SENT_OVERRIDE_OFF` 表示三条恢复命令无异常且全速开关读回为关，不是从 RPM 推断出的自动模式确认。参考固件未提供独立的自动/手动目标读取。
 
 若恢复结果为 `UNCONFIRMED`，先执行 `fans auto` 并核对；程序不能保证系统崩溃或整个进程树被结束后的恢复。断开后原客户端无法接收最终恢复回执，需重新读取。此功能仍标记为实验，常驻控制及温控曲线尚未启用。
+
+收到其他人的报告后，可运行 `pc-control.exe inspect-report feedback.zip` 安全检查，不会启用任何控制功能。详见 [试点反馈流程](docs/feedback-workflow.md)。

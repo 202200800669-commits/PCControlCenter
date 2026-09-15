@@ -12,7 +12,7 @@ public class GenericProvider(IReadOnlyProbe probe) : IHardwareProvider {
    string Field(System.Text.Json.JsonElement e,string name)=>e.TryGetProperty(name,out var v)&&v.ValueKind==System.Text.Json.JsonValueKind.String?PublicText.Clean(v.GetString()):"";
    var displays=new List<DisplayDetails>();
    if(data.TryGetProperty("displays",out var gpus)&&gpus.ValueKind==System.Text.Json.JsonValueKind.Array)
-    foreach(var gpu in gpus.EnumerateArray().Take(8))if(gpu.ValueKind==System.Text.Json.JsonValueKind.Object)displays.Add(new(Field(gpu,"name"),Field(gpu,"driverVersion")));
+    foreach(var gpu in gpus.EnumerateArray().Take(8))if(gpu.ValueKind==System.Text.Json.JsonValueKind.Object)displays.Add(new(Field(gpu,"name"),Field(gpu,"driverVersion"),Field(gpu,"source")));
    system=new(Field(data,"osVersion"),Field(data,"osBuild"),Field(data,"cpuName"),Field(data,"boardMaker"),Field(data,"boardProduct"),displays);
    foreach(var (key,feature) in new[]{("memory",Feature.Memory),("battery",Feature.Battery),("brightness",Feature.Brightness)}) {
     double? value=null;
@@ -37,6 +37,12 @@ public sealed class ThinkBookProvider(IReadOnlyProbe probe) : GenericProvider(pr
  public override async Task<Snapshot> ReadAsync(DeviceIdentity device,CancellationToken ct) {
   if(!Matches(device))throw new InvalidOperationException("IDENTITY_MISMATCH");
   var snapshot=await base.ReadAsync(device,ct);
+  try {
+   var modeData=await Probe.QueryAsync(ProbeKind.ThinkBookMode,ct);var mode=modeData.GetProperty("mode").GetInt32();
+   if(mode is not (0 or 1 or 3 or 4))throw new IOException("UNKNOWN_MODE");
+   snapshot=snapshot with {Readings=[..snapshot.Readings,new(Feature.PerformanceMode,"lenovo-its-mode",mode,"mode",DateTimeOffset.UtcNow,"ok")],Capabilities=snapshot.Capabilities.Select(c=>c.Feature==Feature.PerformanceMode?new Capability(Feature.PerformanceMode,SupportLevel.ReadOnly,false,"mode"):c).ToArray()};
+  }catch(OperationCanceledException){throw;}catch(Exception){snapshot=snapshot with {IssueCodes=[..snapshot.IssueCodes,"THINKBOOK_MODE_UNAVAILABLE"]};}
+
   try {
    var data=await Probe.QueryAsync(ProbeKind.ThinkBookFans,ct);
    var readings=snapshot.Readings.ToList();

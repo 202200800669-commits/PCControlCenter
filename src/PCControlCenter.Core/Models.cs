@@ -25,7 +25,7 @@ public sealed class ProviderRegistry(IEnumerable<IHardwareProvider> providers, I
  }
 }
 
-public sealed record DisplayDetails(string Name,string DriverVersion);
+public sealed record DisplayDetails(string Name,string DriverVersion,string Source="Unknown");
 public sealed record SystemDetails(string OsVersion,string OsBuild,string CpuName,string BoardMaker,string BoardProduct,IReadOnlyList<DisplayDetails> Displays);
 public static class PublicText {
  public static string Clean(string? value)=>new((value??"").Where(c=>!char.IsControl(c)).Take(160).ToArray());
