@@ -12,3 +12,10 @@ jobs:
           global-json-file: global.json
       - run: dotnet build PCControlCenter.sln -c Release
       - run: dotnet run --project tests/PCControlCenter.Tests -c Release --no-build
+      - name: Build and validate self-contained development package
+        shell: pwsh
+        run: |
+          ./scripts/package.ps1
+          $bundle = Get-ChildItem artifacts -Directory -Filter 'pc-control-alpha-*' | Sort-Object Name -Descending | Select-Object -First 1
+          & (Join-Path $bundle.FullName 'pc-control.exe') --help
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI failed to start' }

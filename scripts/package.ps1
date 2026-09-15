@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference='Stop'
+$ErrorActionPreference='Stop'
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
  $dotnet='dotnet'
@@ -30,7 +30,7 @@ try {
  $dirty=[bool](git status --porcelain)
  [ordered]@{schemaVersion=1;sourceCommit=$commit;sourceDirty=$dirty;sdk=$sdk.sdk.version;runtime=$runtimeVersion;rid='win-x64';selfContained=$true;builtAtUtc=[DateTime]::UtcNow.ToString('O')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bundle 'BUILD.json') -Encoding utf8
  $usage=@'
-PC Control Center 0.1.0-alpha.5
+PC Control Center 0.1.0-alpha.6
 Windows x64. .NET 10 runtime is included; no separate runtime installation required.
 Double-click probe.cmd for read-only detection.
 Terminal: pc-control.exe probe --elevated (one-time UAC for fan reads).
@@ -53,6 +53,7 @@ pause
  Get-ChildItem -LiteralPath $bundle -File | Where-Object Extension -eq '.pdb' | Remove-Item
  $hashes=Get-ChildItem -LiteralPath $bundle -File | ForEach-Object { [ordered]@{file=$_.Name;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash} }
  $hashes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bundle 'SHA256.json') -Encoding utf8
+ & (Join-Path $PSScriptRoot 'verify-package.ps1') -PackageDirectory $bundle
  Compress-Archive -LiteralPath $bundle -DestinationPath ($bundle+'.zip')
  Write-Output $bundle
 } finally {Pop-Location}

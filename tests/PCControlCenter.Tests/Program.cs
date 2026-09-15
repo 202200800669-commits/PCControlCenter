@@ -75,6 +75,22 @@ try {
  rejected=false;try{PreferenceStore.Create(Path.Combine(configDir,"range.json"),new Preferences(1,true,0));}catch(InvalidDataException){rejected=true;}
  Check(rejected,"invalid polling interval rejected");
  Check(!Directory.EnumerateFiles(configDir,"*.tmp").Any(),"failed migration leaves no temporary file");
+ var before=PreferenceStore.Read(target);
+ var update=PreferenceStore.Update(target,before.Revision,new Preferences(1,true,7));
+ Check(update.State.Value.PollIntervalSeconds==7&&PreferenceStore.Load(update.BackupPath)==before.Value,"atomic preference update preserves previous configuration");
+ rejected=false;try{PreferenceStore.Update(target,before.Revision,new Preferences(1,false,8));}catch(InvalidOperationException){rejected=true;}
+ Check(rejected&&PreferenceStore.Read(target)==update.State,"stale preference writer cannot overwrite newer changes");
+ var restored=PreferenceStore.Restore(target,update.State.Revision,update.BackupPath);
+ Check(restored.State.Value==before.Value&&PreferenceStore.Load(restored.BackupPath)==update.State.Value,"explicit restore retains displaced preferences");
+ using(var gate=new FileStream(target+".lock",FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None)) {
+  rejected=false;try{PreferenceStore.Update(target,restored.State.Revision,new Preferences());}catch(IOException){rejected=true;}
+  Check(rejected,"concurrent configuration writer is rejected before replacement");
+ }
+ foreach(var invalid in new[]{"{}","{\"SchemaVersion\":1,\"MinimizeToTray\":true,\"PollIntervalSeconds\":3,\"Rpm\":5500}","{\"SchemaVersion\":1,\"MinimizeToTray\":true,\"PollIntervalSeconds\":3,\"PollIntervalSeconds\":5}",new string('x',16385)}) {
+  File.WriteAllText(Path.Combine(configDir,"bad.json"),invalid);rejected=false;
+  try{PreferenceStore.Load(Path.Combine(configDir,"bad.json"));}catch(Exception){rejected=true;}
+  Check(rejected,"incomplete hardware duplicate or oversized settings rejected");
+ }
 } finally{foreach(var f in Directory.GetFiles(configDir))File.Delete(f);Directory.Delete(configDir);}
 var validRequest=new BrokerRequest(BrokerProtocol.Version,Guid.NewGuid().ToString("N"),"read-fans",device);
 Check(BrokerProtocol.Valid(validRequest),"broker accepts read-only versioned request");

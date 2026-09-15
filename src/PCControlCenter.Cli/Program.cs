@@ -4,7 +4,7 @@ using PCControlCenter.Core;
 using PCControlCenter.Providers.Windows;
 Console.OutputEncoding=Encoding.UTF8;
 if(args.Length==0||args is ["--help"]){
- Console.WriteLine("PC Control Center 0.1.0-alpha.5\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\ninspect-report <feedback.zip>         检查用户反馈包");return 0;
+ Console.WriteLine("PC Control Center 0.1.0-alpha.6\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\ninspect-report <feedback.zip>         检查用户反馈包");return 0;
 }
 if(args is ["inspect-report",var reportFile]) {
  try{Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Feedback.Inspect(reportFile),Diagnostics.Json));return 0;}
