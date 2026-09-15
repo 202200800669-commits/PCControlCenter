@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+local/
+*.user
+*.log
+*.zip
+*.pfx
+*.snk
+settings.json

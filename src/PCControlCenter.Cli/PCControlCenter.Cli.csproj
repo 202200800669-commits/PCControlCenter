@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+<PropertyGroup><AssemblyName>pc-control</AssemblyName></PropertyGroup>
+<ItemGroup>
+<ProjectReference Include="../PCControlCenter.Core/PCControlCenter.Core.csproj" />
+<ProjectReference Include="../PCControlCenter.Providers.Windows/PCControlCenter.Providers.Windows.csproj" />
+</ItemGroup>
+</Project>

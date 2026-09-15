@@ -1,0 +1,26 @@
+name: 新型号适配
+description: 提交型号与只读检测结果
+title: "[适配] 品牌 型号"
+body:
+  - type: input
+    id: model
+    attributes:
+      label: 品牌和完整型号
+      description: 不要填写序列号
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: BIOS 和 Windows 版本
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 只读检测结果或诊断包
+      description: 上传前查看 diagnostics.json，删除不希望公开的内容。
+  - type: textarea
+    id: requested
+    attributes:
+      label: 希望支持的功能及官方控制工具名称

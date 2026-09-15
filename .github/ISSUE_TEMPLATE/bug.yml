@@ -1,0 +1,19 @@
+name: 功能故障
+description: 报告可复现问题
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 程序版本
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 型号 固件版本 操作步骤 预期与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: 脱敏诊断信息
