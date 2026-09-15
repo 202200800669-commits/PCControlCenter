@@ -20,11 +20,14 @@ public sealed class WindowsProbe : IReadOnlyProbe {
  @{manufacturer=[string]$c.Manufacturer;product=[string]$p.Name;model=[string]$p.Version;bios=[string]$b.SMBIOSBIOSVersion;platform='Windows'}|ConvertTo-Json -Compress
  """;
  private const string GenericScript="""
- $r=@{memory=$null;battery=$null;brightness=$null}
- try{$o=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 4;$r.memory=[math]::Round((1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize)*100,2)}catch{}
+ $r=@{memory=$null;battery=$null;brightness=$null;osVersion="";osBuild="";cpuName="";boardMaker="";boardProduct="";displays=@()}
+ try{$o=Get-CimInstance Win32_OperatingSystem -OperationTimeoutSec 4;$r.memory=[math]::Round((1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize)*100,2);$r.osVersion=[string]$o.Version;$r.osBuild=[string]$o.BuildNumber}catch{}
  try{$a=@(Get-CimInstance Win32_Battery -OperationTimeoutSec 4);if($a.Count -eq 1){$r.battery=[int]$a[0].EstimatedChargeRemaining}}catch{}
  try{$a=@(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -OperationTimeoutSec 4|Where-Object Active);if($a.Count -eq 1){$r.brightness=[int]$a[0].CurrentBrightness}}catch{}
- $r|ConvertTo-Json -Compress
+ try{$cpu=Get-CimInstance Win32_Processor -OperationTimeoutSec 3|Select-Object -First 1;$r.cpuName=[string]$cpu.Name}catch{}
+ try{$board=Get-CimInstance Win32_BaseBoard -OperationTimeoutSec 3|Select-Object -First 1;$r.boardMaker=[string]$board.Manufacturer;$r.boardProduct=[string]$board.Product}catch{}
+ try{$r.displays=@(Get-CimInstance Win32_VideoController -OperationTimeoutSec 3|ForEach-Object {@{name=[string]$_.Name;driverVersion=[string]$_.DriverVersion}})}catch{}
+ $r|ConvertTo-Json -Depth 4 -Compress
  """;
  private const string FanScript="""
  $c=Get-CimInstance Win32_ComputerSystem -OperationTimeoutSec 4

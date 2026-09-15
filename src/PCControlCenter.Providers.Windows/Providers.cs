@@ -6,9 +6,14 @@ public class GenericProvider(IReadOnlyProbe probe) : IHardwareProvider {
  public virtual string Id=>"windows.generic";
  public virtual bool Matches(DeviceIdentity device)=>true;
  public virtual async Task<Snapshot> ReadAsync(DeviceIdentity device,CancellationToken ct) {
-  var readings=new List<Reading>();var codes=new List<string>();
+  var readings=new List<Reading>();var codes=new List<string>();SystemDetails? system=null;
   try {
    var data=await Probe.QueryAsync(ProbeKind.Generic,ct);
+   string Field(System.Text.Json.JsonElement e,string name)=>e.TryGetProperty(name,out var v)&&v.ValueKind==System.Text.Json.JsonValueKind.String?PublicText.Clean(v.GetString()):"";
+   var displays=new List<DisplayDetails>();
+   if(data.TryGetProperty("displays",out var gpus)&&gpus.ValueKind==System.Text.Json.JsonValueKind.Array)
+    foreach(var gpu in gpus.EnumerateArray().Take(8))if(gpu.ValueKind==System.Text.Json.JsonValueKind.Object)displays.Add(new(Field(gpu,"name"),Field(gpu,"driverVersion")));
+   system=new(Field(data,"osVersion"),Field(data,"osBuild"),Field(data,"cpuName"),Field(data,"boardMaker"),Field(data,"boardProduct"),displays);
    foreach(var (key,feature) in new[]{("memory",Feature.Memory),("battery",Feature.Battery),("brightness",Feature.Brightness)}) {
     double? value=null;
     if(data.TryGetProperty(key,out var item)&&item.ValueKind==System.Text.Json.JsonValueKind.Number&&item.TryGetDouble(out var v)&&double.IsFinite(v)&&v>=0&&v<=100)value=v;
@@ -18,10 +23,10 @@ public class GenericProvider(IReadOnlyProbe probe) : IHardwareProvider {
   var caps=new List<Capability>{new(Feature.DeviceInfo,SupportLevel.ReadOnly,false,"")};
   caps.AddRange(readings.Where(r=>r.Value is not null).Select(r=>new Capability(r.Feature,SupportLevel.ReadOnly,false,r.Unit)));
   foreach(var f in Enum.GetValues<Feature>().Where(f=>caps.All(c=>c.Feature!=f)))caps.Add(new(f,SupportLevel.Unsupported,false,"",Reason:"No verified adapter"));
-  return new(Id,device,caps,readings,codes);
+  return new(Id,device,caps,readings,codes,system);
  }
  public Task<ControlResult> ApplyAsync(DeviceIdentity device,ControlRequest request,CancellationToken ct)=>
-  Task.FromResult(new ControlResult(ResultCode.Unsupported,"Hardware writes are not shipped in this milestone"));
+  Task.FromResult(new ControlResult(ResultCode.Unsupported,"Persistent writes are not available through the generic interface"));
 }
 
 public sealed class ThinkBookProvider(IReadOnlyProbe probe) : GenericProvider(probe) {

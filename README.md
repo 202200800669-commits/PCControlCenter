@@ -1,6 +1,6 @@
 # PC Control Center
 
-多品牌 Windows 电脑控制中心。当前版本为 **0.1.0-alpha.3 架构与限时风扇试运行里程碑**，不是完整硬件控制发行版。
+多品牌 Windows 电脑控制中心。当前版本为 **0.1.0-alpha.4 架构与限时风扇试运行里程碑**，不是完整硬件控制发行版。
 
 ## 当前可用
 
@@ -8,12 +8,13 @@
 - ThinkBook 16p G6 IAX / 21R0 / R2CN57WW 的双风扇只读检测，接口不可用时降级。
 - 华硕、机械革命品牌分流与扩展位置；尚无这两个品牌的专用控制功能。
 - 可选一次性 UAC 权限代理，仅处理已匹配 ThinkBook 的风扇读取，完成后退出。
+- 诊断包含 Windows 版本、主板产品、CPU 与显卡驱动版本，不包含设备序列号。
 - 本地诊断预览和 ZIP 导出，不自动上传，不采集序列号、主机名和网络标识。
 - 已验证参考 ThinkBook 可显式执行 5–30 秒风扇试运行；结束后发送恢复自动命令。其他型号没有写入入口，现有独立控制台继续保留。
 
 ## 构建和运行
 
-当前使用已安装的 .NET SDK 9.0.316。公开发行前迁移到 .NET 10 LTS 并重新验证。
+使用 .NET 10 LTS，SDK 版本固定在 global.json。本机便携 SDK 位于 local/dotnet10，运行 scripts/verify.ps1 和 scripts/package.ps1 会优先使用它。自包含测试包不要求另装运行时。
 
 ```powershell
 dotnet build PCControlCenter.sln -c Release

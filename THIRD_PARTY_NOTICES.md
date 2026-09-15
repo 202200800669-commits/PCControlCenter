@@ -6,6 +6,8 @@ ThinkBook 只读功能编号与身份约束延续本地原型调查，参考 htt
 
 联想官方 BIOS WMI 文档：https://docs.lenovocdrt.com/ref/bios/wmi/wmi_guide/ 。该文档不是跨系列风扇 API 保证。
 
-.NET 生命周期：https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core 。当前本机使用 SDK 9.0.316；计划公开发行前升级 LTS。
+.NET 生命周期：https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core 。现已使用 SDK 10.0.401 / Runtime 10.0.12（Microsoft 官方 ZIP 下载并核对 SHA-512）；运行时随自包含测试包分发。
 
 未使用联想、华硕、机械革命的标志或旧版 Y 图标。设计文件等待 Figma 交接。
+
+自包含发行物内含 Microsoft.NETCore.App Runtime。打包脚本从对应版本 NuGet 运行时包复制 DOTNET-LICENSE.txt 和 DOTNET-THIRD-PARTY-NOTICES.txt；不使用 SDK 中无关组件的通知代替运行时通知。BUILD.json 记录构建的源码提交、脏状态、SDK 和运行时版本。

@@ -123,6 +123,11 @@ foreach(var trial in new[]{new FanTrial("manual",1499,4500,12),new FanTrial("man
 Check(!BrokerProtocol.Valid(validRequest with {Operation="fan-trial"}),"fan request requires typed settings");
 Check(!BrokerProtocol.Valid(validRequest with {Trial=new("auto",0,0,0)}),"read request cannot smuggle fan settings");
 Check((await FanSessionRunner.RunAsync(new("raw",0,0,0),default)).Code=="INVALID_REQUEST","invalid worker request never starts a process");
+Check(PublicText.Clean("\nhello\r\t")=="hello"&&PublicText.Clean(new string('x',300)).Length==160,"public device text strips controls and bounds size");
+using(var report=JsonDocument.Parse(Diagnostics.ToJson(snap with {System=new("10.0","26100","CPU","Maker","Board",[new("GPU","32.0.1")])}))) {
+ Check(report.RootElement.GetProperty("schemaVersion").GetInt32()==2&&report.RootElement.GetProperty("system").GetProperty("Displays")[0].GetProperty("DriverVersion").GetString()=="32.0.1","diagnostic schema includes selected platform and driver fields");
+}
+await FanWorkerTests.RunAllAsync(Check);
 Console.WriteLine($"{passed} tests passed");
 
 sealed class FakeProbe:IReadOnlyProbe {

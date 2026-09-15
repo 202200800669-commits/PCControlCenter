@@ -4,7 +4,7 @@ using PCControlCenter.Core;
 using PCControlCenter.Providers.Windows;
 Console.OutputEncoding=Encoding.UTF8;
 if(args.Length==0||args is ["--help"]){
- Console.WriteLine("PC Control Center 0.1.0-alpha.3\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动");return 0;
+ Console.WriteLine("PC Control Center 0.1.0-alpha.4\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动");return 0;
 }
 if(args is ["import-preferences",var legacy,var destination]) {
  try {PreferenceStore.ImportLegacy(legacy,destination);Console.WriteLine("已导入托盘与刷新间隔偏好；硬件设置未迁移。");return 0;}
