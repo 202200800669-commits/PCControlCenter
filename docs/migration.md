@@ -1,6 +1,6 @@
 # 原型迁移记录
 
-原型为 .NET 9 WPF + PowerShell + EnergyDrv 桥接，原安装仍在 F 盘原目录。此次没有替换已安装应用，也没有改变散热、功耗和充电设置。
+原型为 .NET 9 WPF + PowerShell + EnergyDrv 桥接，原安装仍在 F 盘原目录。新项目没有替换已安装应用。参考机已执行限时风扇试运行及恢复自动命令；功耗和充电写入尚未迁移。
 
 本地 `local/legacy-baseline` 保存原型源码及测试记录，并用 `baseline-sha256.json` 记录哈希。该目录被 Git 忽略，不参与新项目编译、CI 或发布。其图标、界面和底层桥接不会直接复制到公开发行物。
 

@@ -169,6 +169,33 @@ try {
  Check(badEntry,"extra executable entry rejected without execution");
 }finally{if(File.Exists(reportPath))File.Delete(reportPath);}
 await FanWorkerTests.RunAllAsync(Check);
+foreach(var badInterval in new[]{0,31}) {
+ bool rejected=false;try{_ =new MonitorSession(realProvider,device,TimeSpan.FromSeconds(badInterval));}catch(ArgumentOutOfRangeException){rejected=true;}
+ Check(rejected,"monitor rejects invalid polling intervals");
+}
+var monitorProvider=new FakeMonitorProvider(device);
+var monitor=new MonitorSession(monitorProvider,device,TimeSpan.FromSeconds(1));
+using(var cancel=new CancellationTokenSource()) {
+ await using var stream=monitor.WatchAsync(cancel.Token).GetAsyncEnumerator();
+ Check(await stream.MoveNextAsync()&&stream.Current.Device==device,"monitor yields first read without an initial delay");
+ await Task.Delay(30);
+ Check(monitorProvider.Reads==1,"slow consumer does not accumulate background reads");
+ await using(var duplicate=monitor.WatchAsync().GetAsyncEnumerator()) {
+  bool rejected=false;try{await duplicate.MoveNextAsync();}catch(InvalidOperationException){rejected=true;}
+  Check(rejected,"monitor rejects a second simultaneous consumer");
+ }
+ cancel.CancelAfter(20);bool cancelled=false;
+ try{await stream.MoveNextAsync();}catch(OperationCanceledException){cancelled=true;}
+ Check(cancelled&&monitorProvider.Reads==1,"monitor cancellation interrupts polling delay without another read");
+}
+await using(var restarted=monitor.WatchAsync().GetAsyncEnumerator()) {
+ Check(await restarted.MoveNextAsync()&&monitorProvider.Reads==2,"disposed monitor can be restarted");
+}
+monitorProvider.ChangeIdentity=true;
+await using(var mismatched=monitor.WatchAsync().GetAsyncEnumerator()) {
+ bool rejected=false;try{await mismatched.MoveNextAsync();}catch(InvalidOperationException){rejected=true;}
+ Check(rejected,"monitor rejects changed identity before emitting sample");
+}
 Console.WriteLine($"{passed} tests passed");
 
 sealed class FakeProbe:IReadOnlyProbe {
@@ -193,4 +220,15 @@ sealed class FakeWriter(DeviceIdentity identity):IHardwareProvider {
   try{await Task.Delay(10,ct);if(CancelDuringWrite)throw new OperationCanceledException();return new(ResultCode.Success,"read back confirmed");}
   finally{Interlocked.Decrement(ref concurrent);}
  }
+}
+
+sealed class FakeMonitorProvider(DeviceIdentity identity):IHardwareProvider {
+ public int Reads;public bool ChangeIdentity;
+ public string Id=>"monitor-test";
+ public bool Matches(DeviceIdentity device)=>true;
+ public Task<Snapshot> ReadAsync(DeviceIdentity device,CancellationToken ct) {
+  ct.ThrowIfCancellationRequested();Reads++;
+  return Task.FromResult(new Snapshot(Id,ChangeIdentity?identity with {Bios="changed"}:identity,[],[],[]));
+ }
+ public Task<ControlResult> ApplyAsync(DeviceIdentity device,ControlRequest request,CancellationToken ct)=>throw new Exception("Monitor must never write");
 }

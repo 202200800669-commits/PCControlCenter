@@ -4,7 +4,7 @@ using PCControlCenter.Core;
 using PCControlCenter.Providers.Windows;
 Console.OutputEncoding=Encoding.UTF8;
 if(args.Length==0||args is ["--help"]){
- Console.WriteLine("PC Control Center 0.1.0-alpha.6\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\ninspect-report <feedback.zip>         检查用户反馈包");return 0;
+ Console.WriteLine("PC Control Center 0.1.0-alpha.7\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");return 0;
 }
 if(args is ["inspect-report",var reportFile]) {
  try{Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Feedback.Inspect(reportFile),Diagnostics.Json));return 0;}
@@ -14,14 +14,16 @@ if(args is ["import-preferences",var legacy,var destination]) {
  try {PreferenceStore.ImportLegacy(legacy,destination);Console.WriteLine("已导入托盘与刷新间隔偏好；硬件设置未迁移。");return 0;}
  catch(Exception){Console.Error.WriteLine("配置导入失败：检查文件格式、版本、范围及目标是否已存在。");return 7;}
 }
+int? watchSeconds=null;
+if(args is ["watch",var watchInterval]&&int.TryParse(watchInterval,out var intervalSeconds)&&intervalSeconds is >=1 and <=30)watchSeconds=intervalSeconds;
 FanTrial? trial=null;
 if(args is ["fans","auto"])trial=new("auto",0,0,0);
 else if(args is ["fans","full",var duration]&&int.TryParse(duration,out var fullSeconds))trial=new("full",0,0,fullSeconds);
 else if(args is ["fans","manual",var one,var two,var duration2]&&int.TryParse(one,out var rpm1)&&int.TryParse(two,out var rpm2)&&int.TryParse(duration2,out var manualSeconds))trial=new("manual",rpm1,rpm2,manualSeconds);
 if(trial is not null && !trial.IsValid){Console.Error.WriteLine("参数无效：转速 1500–5500 RPM，时限 5–30 秒。");return 2;}
-if(trial is null && !(args is ["probe"] || args is ["export",_] || args is ["probe","--elevated"] || args is ["export",_,"--elevated"])){Console.Error.WriteLine("参数无效，使用 --help。");return 2;}
+if(trial is null && watchSeconds is null && !(args is ["probe"] || args is ["export",_] || args is ["probe","--elevated"] || args is ["export",_,"--elevated"])){Console.Error.WriteLine("参数无效，使用 --help。");return 2;}
 if(!OperatingSystem.IsWindows()){Console.Error.WriteLine("当前探测器仅支持 Windows。");return 3;}
-using var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(110));
+using var cancellation=new CancellationTokenSource(watchSeconds is null?TimeSpan.FromSeconds(110):Timeout.InfiniteTimeSpan);
 Console.CancelKeyPress+=(s,e)=>{e.Cancel=true;cancellation.Cancel();};
 try {
  IReadOnlyProbe probe=new WindowsProbe();var device=await WindowsProbe.IdentifyAsync(probe,cancellation.Token);
@@ -37,11 +39,17 @@ try {
   probe=new ElevatedProbe(probe,device);
  }
  var provider=Providers.Create(probe).Resolve(device);
+ if(watchSeconds is int seconds) {
+  var compact=new System.Text.Json.JsonSerializerOptions(Diagnostics.Json){WriteIndented=false};
+  await foreach(var sample in new MonitorSession(provider,device,TimeSpan.FromSeconds(seconds)).WatchAsync(cancellation.Token))
+   Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(Diagnostics.Report(sample),compact));
+  return 0;
+ }
  var snapshot=await provider.ReadAsync(device,cancellation.Token);
  if(args[0]=="probe")Console.WriteLine(Diagnostics.ToJson(snapshot));
  else {Diagnostics.Export(snapshot,Path.GetFullPath(args[1]));Console.WriteLine("已导出。提交前请打开 diagnostics.json 核对内容；程序不会自动上传。");}
  return 0;
-} catch(OperationCanceledException){Console.Error.WriteLine("请求取消或超时；若试运行已开始，代理会尝试恢复自动散热，结果需重新核对。");return 4;}
+} catch(OperationCanceledException){if(watchSeconds is not null)return 0;Console.Error.WriteLine("请求取消或超时；若试运行已开始，代理会尝试恢复自动散热，结果需重新核对。");return 4;}
 catch(ProbeException e){Console.Error.WriteLine("代理错误码："+e.Code);return 10;}
 catch(IOException){Console.Error.WriteLine("探测或文件操作失败；请检查接口可用性、输出目录和是否存在同名文件。");return 5;}
 catch(Exception){Console.Error.WriteLine("检测未完成；没有导出原始异常或个人路径。");return 6;}

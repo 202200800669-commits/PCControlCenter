@@ -11,7 +11,7 @@ public static class Diagnostics {
  // Only explicitly selected fields enter the report. Never serialize process output,
  // exception messages, registry dumps, serial numbers or user paths.
  public static object Report(Snapshot s)=>new {
-  schemaVersion=2, applicationVersion="0.1.0-alpha.6", capturedAt=DateTimeOffset.UtcNow,
+  schemaVersion=2, applicationVersion="0.1.0-alpha.7", capturedAt=DateTimeOffset.UtcNow,
   provider=s.Provider,
   device=new {manufacturer=s.Device.Manufacturer,product=s.Device.Product,model=s.Device.Model,bios=s.Device.Bios,platform=s.Device.Platform},
   system=s.System,
