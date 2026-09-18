@@ -5,6 +5,7 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
+    <SatelliteResourceLanguages>none</SatelliteResourceLanguages>
     <AssemblyName>pc-control-desktop</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Control.ico</ApplicationIcon>

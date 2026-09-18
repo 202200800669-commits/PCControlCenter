@@ -25,7 +25,7 @@ try {
  Copy-Item -LiteralPath (Join-Path $runtimePackage 'LICENSE.TXT') -Destination (Join-Path $bundle 'DOTNET-LICENSE.txt')
  Copy-Item -LiteralPath (Join-Path $runtimePackage 'THIRD-PARTY-NOTICES.TXT') -Destination (Join-Path $bundle 'DOTNET-THIRD-PARTY-NOTICES.txt')
  Copy-Item -LiteralPath 'THIRD_PARTY_NOTICES.md' -Destination $bundle
- Copy-Item -LiteralPath 'LICENSE.pending.md' -Destination $bundle
+ Copy-Item -LiteralPath 'LICENSE' -Destination $bundle
  $sdk=Get-Content -LiteralPath global.json -Raw | ConvertFrom-Json
  $commit=git rev-parse HEAD
  if($LASTEXITCODE -ne 0){throw 'Source commit unavailable'}
@@ -41,7 +41,7 @@ Terminal: pc-control.exe export feedback.zip
 Review diagnostics.json before sharing. Nothing is uploaded automatically.
 Experimental reference ThinkBook only: fans manual 3500 4500 12
 Trial restores firmware auto commands after expiry or disconnect.
-This is a local development package; publication and licensing review are pending.
+Open source licensed under GNU General Public License v3.0 (GPL-3.0). See LICENSE.
 '@
  [IO.File]::WriteAllText((Join-Path $bundle 'USAGE.txt'),$usage,[Text.Encoding]::UTF8)
  $launcher=@'
@@ -54,7 +54,7 @@ pause
  [IO.File]::WriteAllText((Join-Path $bundle 'probe.cmd'),$launcher,[Text.Encoding]::ASCII)
  Get-ChildItem -LiteralPath $bundle -File | Where-Object Extension -eq '.pdb' | Remove-Item
  $hashes=Get-ChildItem -LiteralPath $bundle -File | ForEach-Object { [ordered]@{file=$_.Name;sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash} }
- $hashes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bundle 'SHA256.json') -Encoding utf8
+ $hashes | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $bundle 'SHA256.json') -Encoding utf8
  & (Join-Path $PSScriptRoot 'verify-package.ps1') -PackageDirectory $bundle
  Compress-Archive -LiteralPath $bundle -DestinationPath ($bundle+'.zip')
  Write-Output $bundle
