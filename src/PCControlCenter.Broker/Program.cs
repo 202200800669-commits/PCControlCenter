@@ -12,8 +12,11 @@ int stage = 10;
 try
 {
     using var parentProcess = Process.GetProcessById(parent);
-    var expected = Path.Combine(AppContext.BaseDirectory, "pc-control.exe");
-    if (!string.Equals(parentProcess.MainModule?.FileName, expected, StringComparison.OrdinalIgnoreCase))
+    var caller = parentProcess.MainModule?.FileName;
+    var expectedCli = Path.Combine(AppContext.BaseDirectory, "pc-control.exe");
+    var expectedDesktop = Path.Combine(AppContext.BaseDirectory, "pc-control-desktop.exe");
+    if (!string.Equals(caller, expectedCli, StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(caller, expectedDesktop, StringComparison.OrdinalIgnoreCase))
         return 4;
     using var pipe = new NamedPipeClientStream(".", args[0], PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
     await pipe.ConnectAsync(deadline.Token);

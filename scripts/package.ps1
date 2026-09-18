@@ -10,6 +10,8 @@ try {
  if($LASTEXITCODE -ne 0){throw 'Publish failed'}
  & $dotnet publish src/PCControlCenter.Broker -c Release -r win-x64 --self-contained true -o $bundle
  if($LASTEXITCODE -ne 0){throw 'Broker publish failed'}
+ & $dotnet publish src/PCControlCenter.Desktop -c Release -r win-x64 --self-contained true -o $bundle
+ if($LASTEXITCODE -ne 0){throw 'Desktop publish failed'}
  $runtime=Get-Content -LiteralPath (Join-Path $bundle 'pc-control.runtimeconfig.json') -Raw | ConvertFrom-Json
  $runtimeVersion=($runtime.runtimeOptions.includedFrameworks | Where-Object name -eq 'Microsoft.NETCore.App').version
  if(!$runtimeVersion){throw 'Self-contained runtime version missing'}
@@ -30,15 +32,15 @@ try {
  $dirty=[bool](git status --porcelain)
  [ordered]@{schemaVersion=1;sourceCommit=$commit;sourceDirty=$dirty;sdk=$sdk.sdk.version;runtime=$runtimeVersion;rid='win-x64';selfContained=$true;builtAtUtc=[DateTime]::UtcNow.ToString('O')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bundle 'BUILD.json') -Encoding utf8
  $usage=@'
-PC Control Center 0.1.0-alpha.10
+PC Control Center 0.1.0-alpha.13
 Windows x64. .NET 10 runtime is included; no separate runtime installation required.
+Double-click pc-control-desktop.exe for graphical control center (non-elevated).
 Double-click probe.cmd for read-only detection.
 Terminal: pc-control.exe probe --elevated (one-time UAC for fan reads).
 Terminal: pc-control.exe export feedback.zip
 Review diagnostics.json before sharing. Nothing is uploaded automatically.
 Experimental reference ThinkBook only: fans manual 3500 4500 12
 Trial restores firmware auto commands after expiry or disconnect.
-No persistent hardware control or new graphical interface/icon is included.
 This is a local development package; publication and licensing review are pending.
 '@
  [IO.File]::WriteAllText((Join-Path $bundle 'USAGE.txt'),$usage,[Text.Encoding]::UTF8)

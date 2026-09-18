@@ -2,30 +2,7 @@
 
 ## 当前版本
 
-0.1.0-alpha.12，本地开发版本，尚未上传 GitHub。图标与版式继续留空。
-
-## 已完成
-
-- Core、适配器、CLI、IPC 和一次性 Broker 分离。
-- 华硕与机械革命品牌发现、通用监控、ThinkBook 精确身份匹配与风扇读取。
-- 明确请求后 UAC 提权，命名管道用户 ACL、网络身份拒绝、双向进程核对、消息限制。
-- 参考机的手动/全速限时试运行与恢复自动命令，独立工作进程负责时限与前端断连后的恢复路径。
-- 脱敏诊断、非硬件偏好迁移、本地 Git、CI 与反馈模板。
-
-## 实机验证
-
-2026-09-15，ThinkBook 16p G6 IAX / 21R0 / R2CN57WW：
-
-| 场景 | 结果 |
-| --- | --- |
-| 普通权限监控 | 型号、内存、电量、亮度正常；风扇接口拒绝访问 |
-| 显式 UAC 读取 | 双风扇 2500 / 2300 RPM，无错误 |
-| 恢复自动 | 恢复命令无异常，全速开关读回为关 |
-# 第一阶段进度
-
-## 当前版本
-
-0.1.0-alpha.10，本地开发版本，尚未上传 GitHub。图标与版式继续留空。
+0.1.0-alpha.13，本地开发版本，尚未上传 GitHub。包含普通权限 WPF 桌面客户端、CLI 与受控 Broker。
 
 ## 已完成
 
@@ -75,4 +52,7 @@ alpha.10 接入固定 NVIDIA 官方只读查询，提供 GPU 温度、负载和�
 alpha.11 迁移联想性能模式（ITS）受控写入与回滚机制。新增强类型 ModeRequest（仅限 0 均衡、1 野兽、3 安静）与 ModeReceipt 回执。Broker 增加 set-mode 受控通道，执行前先核验 ThinkBook 16p G6 IAX 身份、服务就绪性与双互斥锁（检查风扇会话互斥锁与占用模式互斥锁，避免与风扇试运行争用），发送命令后 3 秒内轮询回读确认。若未达到目标档位，自动尝试回滚至先前的原始模式并明确报告恢复状态。CLI 增加 mode <0|1|3> 指令。测试套件扩展至 147 项断言全部通过。
 
 alpha.12 迁移联想能源特性与键盘背光受控写入与回滚机制（方案 B）。新增强类型 EnergyRequest（Kind 仅限 charge/key/night，Value 严格限制合法范围）与 EnergyReceipt 回执。Broker 增加 set-energy 受控通道，基于嵌入式 EnergySession.ps1 与 EnergySessionRunner。执行前严格核验 ThinkBook 16p G6 IAX 身份、检查风扇试运行互斥锁（Global\PCControlCenter.FanSession）与能源会话互斥锁（Global\PCControlCenter.EnergySession），避免多硬件通道争用。写入前暂存旧值，写入后通过 \\.\EnergyDrv 执行最多 8 次轮询回读验证。超时或未确认时自动回滚至先前原始值并返回明确回执。CLI 增加 energy <charge|key|night> <value> 指令。测试套件扩展至 168 项断言全部通过。
+
+alpha.13 交付普通权限桌面客户端架构（PCControlCenter.Desktop / 方案 C）。程序清单声明 asInvoker 普通用户权限，启动零 UAC 弹窗。解耦架构包含 MainWindow、MainViewModel 与五大功能视图（总览、散热、设备、场景、常规设置）。遥测流异步拉取 CPU、内存、电池、NVIDIA 显卡瞬时指标，风扇未提权时显式提示需提权，禁止伪造 0 RPM。性能模式、电池养护模式、夜间慢充与键盘背光支持在界面中点击触发，显式通过 UAC 唤起受控 Broker 执行并更新状态回执。提供 Windows 托盘集成、单实例互斥锁与日志查看导出入口。测试套件扩展至 185 项断言全部通过。
+
 

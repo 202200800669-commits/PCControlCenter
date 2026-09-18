@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>pc-control-desktop</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Control.ico</ApplicationIcon>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../PCControlCenter.Core/PCControlCenter.Core.csproj" />
+    <ProjectReference Include="../PCControlCenter.Providers.Windows/PCControlCenter.Providers.Windows.csproj" />
+    <ProjectReference Include="../PCControlCenter.Ipc/PCControlCenter.Ipc.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Theme.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Control.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
