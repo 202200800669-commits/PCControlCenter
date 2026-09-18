@@ -2,7 +2,7 @@
 
 ## 当前版本
 
-0.1.0-alpha.10，本地开发版本，尚未上传 GitHub。图标与版式继续留空。
+0.1.0-alpha.12，本地开发版本，尚未上传 GitHub。图标与版式继续留空。
 
 ## 已完成
 
@@ -73,3 +73,6 @@ alpha.9 增加未来滑块使用的待处理请求合并层；模拟连续 100 �
 alpha.10 接入固定 NVIDIA 官方只读查询，提供 GPU 温度、负载和功耗。直接调用本机工具时观测 48°C / 0% / 6.65W；该瞬时读数不是温度上限或性能测试结论。
 
 alpha.11 迁移联想性能模式（ITS）受控写入与回滚机制。新增强类型 ModeRequest（仅限 0 均衡、1 野兽、3 安静）与 ModeReceipt 回执。Broker 增加 set-mode 受控通道，执行前先核验 ThinkBook 16p G6 IAX 身份、服务就绪性与双互斥锁（检查风扇会话互斥锁与占用模式互斥锁，避免与风扇试运行争用），发送命令后 3 秒内轮询回读确认。若未达到目标档位，自动尝试回滚至先前的原始模式并明确报告恢复状态。CLI 增加 mode <0|1|3> 指令。测试套件扩展至 147 项断言全部通过。
+
+alpha.12 迁移联想能源特性与键盘背光受控写入与回滚机制（方案 B）。新增强类型 EnergyRequest（Kind 仅限 charge/key/night，Value 严格限制合法范围）与 EnergyReceipt 回执。Broker 增加 set-energy 受控通道，基于嵌入式 EnergySession.ps1 与 EnergySessionRunner。执行前严格核验 ThinkBook 16p G6 IAX 身份、检查风扇试运行互斥锁（Global\PCControlCenter.FanSession）与能源会话互斥锁（Global\PCControlCenter.EnergySession），避免多硬件通道争用。写入前暂存旧值，写入后通过 \\.\EnergyDrv 执行最多 8 次轮询回读验证。超时或未确认时自动回滚至先前原始值并返回明确回执。CLI 增加 energy <charge|key|night> <value> 指令。测试套件扩展至 168 项断言全部通过。
+

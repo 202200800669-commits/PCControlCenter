@@ -5,7 +5,7 @@ using PCControlCenter.Providers.Windows;
 Console.OutputEncoding = Encoding.UTF8;
 if (args.Length == 0 || args is ["--help"])
 {
-    Console.WriteLine("PC Control Center 0.1.0-alpha.10\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\nmode <0|1|3>                        切换联想性能模式（0=均衡, 1=野兽, 3=安静）\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");
+    Console.WriteLine("PC Control Center 0.1.0-alpha.10\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\nmode <0|1|3>                        切换联想性能模式（0=均衡, 1=野兽, 3=安静）\nenergy <charge|key|night> <value>   设置能源/外设（charge: 0=普通/1=养护/2=快充; key: 0=关/1=低/2=高/3=自动; night: 0=关/1=开）\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");
     return 0;
 }
 if (args is ["inspect-report", var reportFile])
@@ -40,8 +40,15 @@ ModeRequest? modeRequest = null;
 if (args is ["mode", var modeStr] && int.TryParse(modeStr, out var m) && m is 0 or 1 or 3)
     modeRequest = new(m);
 if (args is ["mode", _] && modeRequest is null) { Console.Error.WriteLine("参数无效：性能模式仅支持 0（均衡）、1（野兽/高性能）、3（安静/节能）。"); return 2; }
+EnergyRequest? energyRequest = null;
+if (args is ["energy", var kindStr, var valStr] && int.TryParse(valStr, out var ev))
+{
+    var candidate = new EnergyRequest(kindStr, ev);
+    if (candidate.IsValid) energyRequest = candidate;
+}
+if (args is ["energy", ..] && energyRequest is null) { Console.Error.WriteLine("参数无效：energy charge <0-2>（0=普通, 1=养护, 2=快充）/ energy key <0-3>（0=关, 1=低, 2=高, 3=自动）/ energy night <0-1>。"); return 2; }
 if (trial is not null && !trial.IsValid) { Console.Error.WriteLine("参数无效：转速 1500–5500 RPM，时限 5–30 秒。"); return 2; }
-if (trial is null && modeRequest is null && watchSeconds is null && !(args is ["probe"] || args is ["export", _] || args is ["probe", "--elevated"] || args is ["export", _, "--elevated"])) { Console.Error.WriteLine("参数无效，使用 --help。"); return 2; }
+if (trial is null && modeRequest is null && energyRequest is null && watchSeconds is null && !(args is ["probe"] || args is ["export", _] || args is ["probe", "--elevated"] || args is ["export", _, "--elevated"])) { Console.Error.WriteLine("参数无效，使用 --help。"); return 2; }
 if (!OperatingSystem.IsWindows()) { Console.Error.WriteLine("当前探测器仅支持 Windows。"); return 3; }
 using var cancellation = new CancellationTokenSource(watchSeconds is null ? TimeSpan.FromSeconds(110) : Timeout.InfiniteTimeSpan);
 Console.CancelKeyPress += (s, e) => { e.Cancel = true; cancellation.Cancel(); };
@@ -72,6 +79,18 @@ try
         var response = await BrokerClient.ExecuteAsync(new(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "set-mode", device, Mode: modeRequest), cancellation.Token);
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(response, Diagnostics.Json));
         return response.Code == "OK" && response.ModeReceipt is { Code: "COMPLETED" } ? 0 : 9;
+    }
+    if (energyRequest is not null)
+    {
+        if (!new ThinkBookProvider(probe).Matches(device))
+        {
+            Console.Error.WriteLine("当前设备尚无经过验证的能源控制接口。");
+            return 8;
+        }
+        Console.Error.WriteLine($"即将请求管理员授权。将 {energyRequest.Kind} 设置为 {energyRequest.Value} 并回读确认。");
+        var response = await BrokerClient.ExecuteAsync(new(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "set-energy", device, Energy: energyRequest), cancellation.Token);
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(response, Diagnostics.Json));
+        return response.Code == "OK" && response.EnergyReceipt is { Code: "COMPLETED" } ? 0 : 9;
     }
     if (args.Contains("--elevated") && new ThinkBookProvider(probe).Matches(device))
     {

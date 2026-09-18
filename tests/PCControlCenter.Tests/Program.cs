@@ -300,6 +300,37 @@ Check(!BrokerProtocol.Valid(validRequest with { Operation = "set-mode" }), "mode
 Check(!BrokerProtocol.Valid(validRequest with { Mode = new(0) }), "read request cannot smuggle mode settings");
 Check(!BrokerProtocol.Valid(validRequest with { Operation = "set-mode", Mode = new(0), Trial = new("auto", 0, 0, 0) }), "cannot smuggle fan settings in mode request");
 Check((await ModeSessionRunner.RunAsync(new(99), default)).Code == "INVALID_REQUEST", "invalid mode worker request never starts a process");
+foreach (var (k, v) in new[] { ("charge", 1), ("key", 2), ("night", 1) })
+{
+    var energyReq = new EnergyRequest(k, v);
+    Check(energyReq.IsValid && BrokerProtocol.Valid(validRequest with
+    {
+        Operation = "set-energy",
+        Energy = energyReq
+    }), "typed valid energy request accepted");
+    using var energyFrame = new MemoryStream();
+    var q = validRequest with
+    {
+        Operation = "set-energy",
+        Energy = energyReq
+    };
+    await BrokerProtocol.SendAsync(energyFrame, q, default);
+    energyFrame.Position = 0;
+    Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(energyFrame, default) == q, "energy request frame round trip");
+}
+foreach (var (k, v) in new[] { ("charge", 3), ("key", 4), ("night", 2), ("invalid", 0) })
+{
+    var badReq = new EnergyRequest(k, v);
+    Check(!badReq.IsValid && !BrokerProtocol.Valid(validRequest with
+    {
+        Operation = "set-energy",
+        Energy = badReq
+    }), "invalid energy request rejected");
+}
+Check(!BrokerProtocol.Valid(validRequest with { Operation = "set-energy" }), "energy request requires typed settings");
+Check(!BrokerProtocol.Valid(validRequest with { Energy = new("charge", 1) }), "read request cannot smuggle energy settings");
+Check(!BrokerProtocol.Valid(validRequest with { Operation = "set-energy", Energy = new("charge", 1), Mode = new(1) }), "cannot smuggle mode settings in energy request");
+Check((await EnergySessionRunner.RunAsync(new("invalid", 0), default)).Code == "INVALID_REQUEST", "invalid energy worker request never starts a process");
 Check(PublicText.Clean("\nhello\r\t") == "hello" && PublicText.Clean(new string('x', 300)).Length == 160, "public device text strips controls and bounds size");
 using (var report = JsonDocument.Parse(Diagnostics.ToJson(snap with
 {
@@ -373,6 +404,7 @@ try
 finally { if (File.Exists(reportPath)) File.Delete(reportPath); }
 await FanWorkerTests.RunAllAsync(Check);
 await ModeWorkerTests.RunAllAsync(Check);
+await EnergyWorkerTests.RunAllAsync(Check);
 foreach (var badInterval in new[] { 0, 31 })
 {
     bool rejected = false;

@@ -23,6 +23,13 @@ public sealed record ModeRequest(int Mode)
     public bool IsValid => Mode is 0 or 1 or 3;
 }
 public sealed record ModeReceipt(string Code, int TargetMode, int? PreviousMode = null, int? FinalMode = null, string Recovery = "NONE");
+public sealed record EnergyRequest(string Kind, int Value)
+{
+    public bool IsValid => (Kind == "charge" && Value is >= 0 and <= 2) ||
+                           (Kind == "night" && Value is 0 or 1) ||
+                           (Kind == "key" && Value is >= 0 and <= 3);
+}
+public sealed record EnergyReceipt(string Code, string Kind, int TargetValue, int? PreviousValue = null, int? FinalValue = null, string Recovery = "NONE");
 
 public interface IHardwareProvider
 {

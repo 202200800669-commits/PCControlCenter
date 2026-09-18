@@ -65,6 +65,11 @@ try
                 var receipt = await ModeSessionRunner.RunAsync(request.Mode!, deadline.Token);
                 response = new(BrokerProtocol.Version, request.RequestId, "OK", ModeReceipt: receipt);
             }
+            else if (request.Operation == "set-energy")
+            {
+                var receipt = await EnergySessionRunner.RunAsync(request.Energy!, deadline.Token);
+                response = new(BrokerProtocol.Version, request.RequestId, "OK", EnergyReceipt: receipt);
+            }
             else
             {
                 response = new(BrokerProtocol.Version, request.RequestId, "UNKNOWN_OPERATION");

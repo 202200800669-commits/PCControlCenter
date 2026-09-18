@@ -14,6 +14,9 @@ $cases=@(
  @{Args=@('watch','3','--elevated');Code=2},
  @{Args=@('mode','2');Code=2},
  @{Args=@('mode','bad');Code=2},
+ @{Args=@('energy','charge','3');Code=2},
+ @{Args=@('energy','key','5');Code=2},
+ @{Args=@('energy','night','2');Code=2},
  @{Args=@('inspect-report',(Join-Path $env:TEMP ([Guid]::NewGuid().ToString('N')+'.zip')));Code=11}
 )
 foreach($case in $cases) {

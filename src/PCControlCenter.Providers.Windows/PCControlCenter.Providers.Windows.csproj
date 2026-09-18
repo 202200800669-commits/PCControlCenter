@@ -2,5 +2,6 @@
 <ItemGroup>
 <ProjectReference Include="../PCControlCenter.Core/PCControlCenter.Core.csproj" />
 <EmbeddedResource Include="FanSession.ps1" />
-<EmbeddedResource Include="ModeSession.ps1" /></ItemGroup>
+<EmbeddedResource Include="ModeSession.ps1" />
+<EmbeddedResource Include="EnergySession.ps1" /></ItemGroup>
 </Project>
