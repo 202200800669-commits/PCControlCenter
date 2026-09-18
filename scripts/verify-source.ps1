@@ -23,7 +23,7 @@ foreach($relative in $files) {
  $path=Join-Path $root $relative
  $file=Get-Item -LiteralPath $path -Force
  if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw ('Tracked link requires review: '+$relative)}
- if($file.Extension -in @('.cs','.ps1','.md','.json','.yml','.yaml','.props','.csproj','.xml','.txt','.config')) {
+ if($file.Extension -in @('.cs','.ps1','.md','.json','.yml','.yaml','.props','.csproj','.xml','.txt','.config','.iss')) {
   if($file.Length -gt 2097152){throw ('Source file exceeds review limit: '+$relative)}
   $body=[IO.File]::ReadAllText($path)
   if($body -match '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' -or $body -match '\bghp_[A-Za-z0-9]{36}\b' -or $body -match '\bgithub_pat_[A-Za-z0-9_]{80,}\b'){throw ('Possible credential in: '+$relative)}

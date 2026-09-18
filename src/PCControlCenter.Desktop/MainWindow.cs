@@ -27,7 +27,7 @@ public sealed class MainWindow : Window
     private Forms.NotifyIcon? tray;
     private bool allowExit;
 
-    public MainWindow()
+    public MainWindow(bool startMinimized = false)
     {
         Title = "PC Control Center";
         Width = 1140;
@@ -67,6 +67,11 @@ public sealed class MainWindow : Window
         Loaded += async (s, e) =>
         {
             SetupTray();
+            if (startMinimized)
+            {
+                Hide();
+                tray?.ShowBalloonTip(1500, "PC Control Center", "已在后台静默运行，双击托盘图标打开主界面。", Forms.ToolTipIcon.Info);
+            }
             await vm.InitializeAsync();
             timer.Start();
         };

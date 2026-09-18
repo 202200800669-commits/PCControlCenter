@@ -92,6 +92,50 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public int PollIntervalSeconds { get => pollIntervalSeconds; set { pollIntervalSeconds = value; Notify(); } }
     public ProfileItem? SelectedProfile { get => selectedProfile; set { selectedProfile = value; Notify(); } }
 
+    private const string RunRegKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunAppName = "PCControlCenter";
+
+    public bool AutoStart
+    {
+        get
+        {
+            if (!OperatingSystem.IsWindows()) return false;
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegKey, false);
+                return key?.GetValue(RunAppName) != null;
+            }
+            catch { return false; }
+        }
+        set
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegKey, true);
+                if (key != null)
+                {
+                    if (value)
+                    {
+                        var exePath = Environment.ProcessPath ?? System.IO.Path.Combine(AppContext.BaseDirectory, "pc-control-desktop.exe");
+                        key.SetValue(RunAppName, $"\"{exePath}\" --minimized");
+                        AddLog("已启用开机自动启动（最小化到托盘）");
+                    }
+                    else
+                    {
+                        key.DeleteValue(RunAppName, false);
+                        AddLog("已禁用开机自动启动");
+                    }
+                }
+                Notify();
+            }
+            catch (Exception ex)
+            {
+                AddLog($"设置自启动失败: {ex.Message}");
+            }
+        }
+    }
+
     public MainViewModel()
     {
         for (int i = 0; i < 60; i++)

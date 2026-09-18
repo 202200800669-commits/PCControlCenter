@@ -25,7 +25,8 @@ public sealed class SettingsView : StackPanel
         MinHeight = 160,
         MaxHeight = 260
     };
-    private readonly CheckBox trayCheck = new() { Content = "关闭主窗口时收起到系统托盘", IsChecked = true };
+    private readonly CheckBox trayCheck = new() { Content = "关闭主窗口时收起到系统托盘", IsChecked = true, Margin = new Thickness(0, 0, 0, 8) };
+    private readonly CheckBox autoStartCheck = new() { Content = "开机自动启动 (最小化到托盘)", Margin = new Thickness(0, 0, 0, 8) };
     private readonly ComboBox intervalCombo = new() { ItemsSource = new[] { "2 秒", "3 秒", "5 秒", "10 秒" }, SelectedIndex = 1, MinHeight = 36 };
 
     public event Action? RequestExit;
@@ -40,6 +41,10 @@ public sealed class SettingsView : StackPanel
             {
                 logBox.Text = vm.LogText;
                 logBox.ScrollToEnd();
+            }
+            else if (e.PropertyName == nameof(vm.AutoStart))
+            {
+                autoStartCheck.IsChecked = vm.AutoStart;
             }
         };
     }
@@ -66,6 +71,10 @@ public sealed class SettingsView : StackPanel
         trayCheck.Checked += (s, e) => vm.MinimizeToTray = true;
         trayCheck.Unchecked += (s, e) => vm.MinimizeToTray = false;
 
+        autoStartCheck.IsChecked = vm.AutoStart;
+        autoStartCheck.Checked += (s, e) => vm.AutoStart = true;
+        autoStartCheck.Unchecked += (s, e) => vm.AutoStart = false;
+
         intervalCombo.SelectionChanged += (s, e) =>
         {
             vm.PollIntervalSeconds = new[] { 2, 3, 5, 10 }[intervalCombo.SelectedIndex];
@@ -77,6 +86,7 @@ public sealed class SettingsView : StackPanel
             Text("主题重音色彩:", 12),
             colorRow,
             trayCheck,
+            autoStartCheck,
             Text("后台遥测刷新间隔:", 12, "#315772"),
             intervalCombo
         ));

@@ -47,7 +47,13 @@ public static class Program
         }
         catch { }
 
-        var window = new MainWindow();
+        bool startMinimized = args.Contains("--minimized");
+        var window = new MainWindow(startMinimized);
+        if (startMinimized)
+        {
+            window.WindowState = WindowState.Minimized;
+            window.ShowInTaskbar = false;
+        }
         app.Run(window);
     }
 }
