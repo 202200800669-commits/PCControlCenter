@@ -63,6 +63,5 @@
 - alpha.12：迁移联想能源特性与键盘背光受控写入与回滚机制（方案 B），168 项断言通过。
 - alpha.13：交付普通权限 WPF 桌面客户端（方案 C，asInvoker，卡片 UI，托盘生命周期），185 项断言全部通过。
 - 发布冲刺（路径 1）：解决跨 PowerShell 版本 JSON 解析兼容性，将桌面端纳入平铺自包含打包（271 个文件），确立 GPL-3.0 开源许可并完成第三方知识产权与逆向工程参考边界声明（THIRD_PARTY_NOTICES.md）。
-
-
-
+- 方向 B（安装与体验深化）：落地单用户免提权安装器与干净卸载（scripts/install-peruser.ps1）、Inno Setup 安装脚本（installer/setup.iss）、Windows 11 SDK signtool + DigiCert RFC 3161 时间戳签名与验签工具链、桌面端 --minimized 静默托盘启动与开机自动启动注册表联动。
+- 分支二（阶段二启动：跨品牌硬件协议调研）：完成华硕（ASUS System Control Interface v3 / WMI AsusAtkWmi_WMNB）与机械革命（Uniwill / Tongfang 控制台驱动与服务架构）官网检索与协议分析，形成 docs/cross-brand-research.md；本地 ThinkBook 样机负向探测验证零跨品牌 WMI 污染，核心库仅开放只读发现 BrandDiscoveryProvider，保持控制写入严密关闭。
