@@ -269,6 +269,37 @@ foreach (var trial in new[] { new FanTrial("manual", 1499, 4500, 12), new FanTri
 Check(!BrokerProtocol.Valid(validRequest with { Operation = "fan-trial" }), "fan request requires typed settings");
 Check(!BrokerProtocol.Valid(validRequest with { Trial = new("auto", 0, 0, 0) }), "read request cannot smuggle fan settings");
 Check((await FanSessionRunner.RunAsync(new("raw", 0, 0, 0), default)).Code == "INVALID_REQUEST", "invalid worker request never starts a process");
+foreach (var m in new[] { 0, 1, 3 })
+{
+    var modeReq = new ModeRequest(m);
+    Check(modeReq.IsValid && BrokerProtocol.Valid(validRequest with
+    {
+        Operation = "set-mode",
+        Mode = modeReq
+    }), "typed valid performance mode request accepted");
+    using var modeFrame = new MemoryStream();
+    var q = validRequest with
+    {
+        Operation = "set-mode",
+        Mode = modeReq
+    };
+    await BrokerProtocol.SendAsync(modeFrame, q, default);
+    modeFrame.Position = 0;
+    Check(await BrokerProtocol.ReceiveAsync<BrokerRequest>(modeFrame, default) == q, "mode request frame round trip");
+}
+foreach (var m in new[] { -1, 2, 4, 99 })
+{
+    var badReq = new ModeRequest(m);
+    Check(!badReq.IsValid && !BrokerProtocol.Valid(validRequest with
+    {
+        Operation = "set-mode",
+        Mode = badReq
+    }), "invalid performance mode request rejected");
+}
+Check(!BrokerProtocol.Valid(validRequest with { Operation = "set-mode" }), "mode request requires typed settings");
+Check(!BrokerProtocol.Valid(validRequest with { Mode = new(0) }), "read request cannot smuggle mode settings");
+Check(!BrokerProtocol.Valid(validRequest with { Operation = "set-mode", Mode = new(0), Trial = new("auto", 0, 0, 0) }), "cannot smuggle fan settings in mode request");
+Check((await ModeSessionRunner.RunAsync(new(99), default)).Code == "INVALID_REQUEST", "invalid mode worker request never starts a process");
 Check(PublicText.Clean("\nhello\r\t") == "hello" && PublicText.Clean(new string('x', 300)).Length == 160, "public device text strips controls and bounds size");
 using (var report = JsonDocument.Parse(Diagnostics.ToJson(snap with
 {
@@ -341,6 +372,7 @@ try
 }
 finally { if (File.Exists(reportPath)) File.Delete(reportPath); }
 await FanWorkerTests.RunAllAsync(Check);
+await ModeWorkerTests.RunAllAsync(Check);
 foreach (var badInterval in new[] { 0, 31 })
 {
     bool rejected = false;

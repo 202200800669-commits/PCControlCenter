@@ -18,6 +18,11 @@ public sealed record Reading(Feature Feature, string Channel, double? Value, str
 public sealed record Snapshot(string Provider, DeviceIdentity Device, IReadOnlyList<Capability> Capabilities, IReadOnlyList<Reading> Readings, IReadOnlyList<string> IssueCodes, SystemDetails? System = null);
 public sealed record ControlRequest(Feature Feature, double Value);
 public sealed record ControlResult(ResultCode Code, string Message);
+public sealed record ModeRequest(int Mode)
+{
+    public bool IsValid => Mode is 0 or 1 or 3;
+}
+public sealed record ModeReceipt(string Code, int TargetMode, int? PreviousMode = null, int? FinalMode = null, string Recovery = "NONE");
 
 public interface IHardwareProvider
 {

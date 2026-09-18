@@ -38,7 +38,7 @@ try
                 var reading = await probe.QueryAsync(ProbeKind.ThinkBookFans, deadline.Token);
                 response = new(BrokerProtocol.Version, request.RequestId, "OK", reading.GetProperty("fan1").GetInt32(), reading.GetProperty("fan2").GetInt32());
             }
-            else
+            else if (request.Operation == "fan-trial")
             {
                 using var stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
                 using var watch = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
@@ -59,6 +59,15 @@ try
                 watch.Cancel();
                 await disconnected;
                 response = new(BrokerProtocol.Version, request.RequestId, "OK", Receipt: receipt);
+            }
+            else if (request.Operation == "set-mode")
+            {
+                var receipt = await ModeSessionRunner.RunAsync(request.Mode!, deadline.Token);
+                response = new(BrokerProtocol.Version, request.RequestId, "OK", ModeReceipt: receipt);
+            }
+            else
+            {
+                response = new(BrokerProtocol.Version, request.RequestId, "UNKNOWN_OPERATION");
             }
         }
     }
