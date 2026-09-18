@@ -6,7 +6,7 @@ public enum SupportLevel
 }
 public enum Feature
 {
-    DeviceInfo, Memory, Battery, Brightness, FanRpm, FanControl, FanTrial, PerformanceMode, CpuPower, Charging, Keyboard, GraphicsMode, GpuTemperature, GpuUtilization, GpuPower
+    DeviceInfo, Memory, Battery, Brightness, FanRpm, FanControl, FanTrial, PerformanceMode, CpuPower, Charging, Keyboard, GraphicsMode, GpuTemperature, GpuUtilization, GpuPower, PowerSource, PowerPlan
 }
 public enum ResultCode
 {
@@ -53,7 +53,7 @@ public sealed class ProviderRegistry(IEnumerable<IHardwareProvider> providers, I
 }
 
 public sealed record DisplayDetails(string Name, string DriverVersion, string Source = "Unknown");
-public sealed record SystemDetails(string OsVersion, string OsBuild, string CpuName, string BoardMaker, string BoardProduct, IReadOnlyList<DisplayDetails> Displays);
+public sealed record SystemDetails(string OsVersion, string OsBuild, string CpuName, string BoardMaker, string BoardProduct, IReadOnlyList<DisplayDetails> Displays, IReadOnlyList<string>? DiscoveredInterfaces = null, string? PowerSource = null, string? PowerPlan = null);
 public static class PublicText
 {
     public static string Clean(string? value) => new((value ?? "").Where(c => !char.IsControl(c)).Take(160).ToArray());

@@ -26,6 +26,23 @@ Check(snap.Readings.Single(r => r.Feature == Feature.PerformanceMode).Value == 0
 Check(snap.Capabilities.Any(c => c.Feature == Feature.FanTrial && c.Level == SupportLevel.Experimental && c.CanWrite), "bounded fan trial explicitly marked experimental");
 Check(snap.Capabilities.Where(c => c.Feature != Feature.FanTrial).All(c => !c.CanWrite), "monitoring providers advertise no persistent writes");
 Check((await new Controller(realProvider, device).ApplyAsync(new(Feature.FanControl, 3000))).Code == ResultCode.Unsupported, "generic controller rejects persistent writes");
+var asusDev = device with { Manufacturer = "ASUSTeK COMPUTER INC." };
+var asusProvider = registry.Resolve(asusDev);
+var asusSnap = await asusProvider.ReadAsync(asusDev, default);
+Check(asusSnap.Capabilities.Any(c => c.Feature == Feature.PerformanceMode && c.Level == SupportLevel.ReadOnly && !c.CanWrite), "ASUS conceptual performance mode capability");
+Check(asusSnap.Capabilities.Any(c => c.Feature == Feature.Battery && c.Min == 60 && c.Max == 100), "ASUS conceptual battery charging capability");
+Check((await asusProvider.ApplyAsync(asusDev, new(Feature.PerformanceMode, 1), default)).Code == ResultCode.Unsupported, "ASUS writes locked pending feedback");
+Check(asusSnap.IssueCodes.Contains("ASUS_WMI_INTERFACE_UNAVAILABLE"), "ASUS WMI missing reports diagnostic code");
+
+var mechrevoDev = device with { Manufacturer = "MECHREVO" };
+var mechrevoProvider = registry.Resolve(mechrevoDev);
+var mechrevoSnap = await mechrevoProvider.ReadAsync(mechrevoDev, default);
+Check(mechrevoSnap.Capabilities.Any(c => c.Feature == Feature.PerformanceMode && c.Level == SupportLevel.ReadOnly && !c.CanWrite), "Mechrevo conceptual performance mode capability");
+Check((await mechrevoProvider.ApplyAsync(mechrevoDev, new(Feature.PerformanceMode, 1), default)).Code == ResultCode.Unsupported, "Mechrevo writes locked pending feedback");
+Check(mechrevoSnap.IssueCodes.Contains("MECHREVO_INTERFACE_UNAVAILABLE"), "Mechrevo interface missing reports diagnostic code");
+
+var issueMd = Diagnostics.FormatGitHubIssueMarkdown(snap);
+Check(issueMd.Contains("### 硬件环境与固件信息") && issueMd.Contains("LENOVO") && issueMd.Contains("21R0"), "GitHub issue markdown contains identity and survey");
 probe.FailFans = true;
 var degraded = await realProvider.ReadAsync(device, default);
 Check(degraded.IssueCodes.Contains("THINKBOOK_FAN_READ_UNAVAILABLE") && degraded.Readings.All(r => r.Feature != Feature.FanRpm), "failed fan read has no fabricated values");

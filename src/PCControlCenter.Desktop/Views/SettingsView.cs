@@ -100,11 +100,46 @@ public sealed class SettingsView : StackPanel
         // Actions Card
         var actionsRow = Row(
             CreateActionButton("程序目录", () => Process.Start(new ProcessStartInfo(AppContext.BaseDirectory) { UseShellExecute = true })),
+            CreateActionButton("复制 GitHub 反馈模板", () =>
+            {
+                try
+                {
+                    var snap = vm.CurrentSnapshot;
+                    if (snap is null)
+                    {
+                        MessageBox.Show("尚未获取到设备硬件快照，请稍候片刻重试。", "提示");
+                        return;
+                    }
+                    var md = PCControlCenter.Core.Diagnostics.FormatGitHubIssueMarkdown(snap);
+                    Clipboard.SetText(md);
+                    vm.AddLog("已成功将 GitHub 适配反馈模板复制到剪贴板。");
+                    MessageBox.Show("已将 GitHub Issue 适配反馈模板复制到系统剪贴板！\n\n您可以直接在 GitHub 仓库新建 Issue 并粘贴该内容，帮助开发者快速完成对您机型的适配。", "复制成功");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"生成反馈模板异常: {ex.Message}", "错误");
+                }
+            }),
             CreateActionButton("导出脱敏反馈", () =>
             {
-                var zipPath = Path.Combine(AppContext.BaseDirectory, "feedback.zip");
-                vm.AddLog($"诊断反馈包指令: 可使用 CLI 'pc-control export {zipPath}' 生成");
-                MessageBox.Show($"已准备诊断反馈链路，建议使用 CLI 执行脱敏打包。\n目标路径: {zipPath}", "诊断支持");
+                try
+                {
+                    var snap = vm.CurrentSnapshot;
+                    if (snap is null)
+                    {
+                        MessageBox.Show("尚未获取到设备硬件快照，请稍候片刻重试。", "提示");
+                        return;
+                    }
+                    var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                    var zipPath = Path.Combine(desktopPath, $"pc-control-feedback-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                    PCControlCenter.Core.Diagnostics.Export(snap, zipPath);
+                    vm.AddLog($"已导出脱敏诊断包: {Path.GetFileName(zipPath)}");
+                    MessageBox.Show($"已成功生成并导出脱敏诊断包至桌面：\n{zipPath}\n\n该包不含序列号或个人敏感信息，可安全附于 GitHub 反馈中。", "导出成功");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"导出诊断包失败: {ex.Message}", "错误");
+                }
             }),
             CreateActionButton("退出程序", () => RequestExit?.Invoke())
         );

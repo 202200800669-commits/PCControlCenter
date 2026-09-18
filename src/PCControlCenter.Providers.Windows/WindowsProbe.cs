@@ -32,12 +32,22 @@ public sealed class WindowsProbe : IReadOnlyProbe
  @{manufacturer=[string]$c.Manufacturer;product=[string]$p.Name;model=[string]$p.Version;bios=[string]$b.SMBIOSBIOSVersion;platform='Windows'}|ConvertTo-Json -Compress
  """;
     private const string GenericScript = """
- $r=@{memory=$null;battery=$null;brightness=$null;osVersion="";osBuild="";cpuName="";boardMaker="";boardProduct="";displays=@()}
+ $r=@{memory=$null;battery=$null;brightness=$null;osVersion="";osBuild="";cpuName="";boardMaker="";boardProduct="";displays=@();interfaces=@();powerSource="";powerPlan=""}
  try{$o=Get-CimInstance Win32_OperatingSystem -Property FreePhysicalMemory,TotalVisibleMemorySize,Version,BuildNumber -OperationTimeoutSec 4;$r.memory=[math]::Round((1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize)*100,2);$r.osVersion=[string]$o.Version;$r.osBuild=[string]$o.BuildNumber}catch{}
- try{$a=@(Get-CimInstance Win32_Battery -Property EstimatedChargeRemaining -OperationTimeoutSec 4);if($a.Count -eq 1){$r.battery=[int]$a[0].EstimatedChargeRemaining}}catch{}
+ try{$a=@(Get-CimInstance Win32_Battery -Property EstimatedChargeRemaining,BatteryStatus -OperationTimeoutSec 4);if($a.Count -eq 1){$r.battery=[int]$a[0].EstimatedChargeRemaining;$r.powerSource=if($a[0].BatteryStatus -eq 2){'AC'}else{'Battery'}}}catch{}
  try{$a=@(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -OperationTimeoutSec 4|Where-Object Active);if($a.Count -eq 1){$r.brightness=[int]$a[0].CurrentBrightness}}catch{}
  try{$cpu=Get-CimInstance Win32_Processor -Property Name -OperationTimeoutSec 3|Select-Object -First 1;$r.cpuName=[string]$cpu.Name}catch{}
  try{$board=Get-CimInstance Win32_BaseBoard -Property Manufacturer,Product -OperationTimeoutSec 3|Select-Object -First 1;$r.boardMaker=[string]$board.Manufacturer;$r.boardProduct=[string]$board.Product}catch{}
+ try{$out=powercfg /getactivescheme;if($out -match '\((.+?)\)'){$r.powerPlan=$matches[1]}}catch{}
+ try{
+  $ifaces=@()
+  if(@(Get-CimClass -Namespace root/wmi -ClassName AsusAtkWmi_WMNB -OperationTimeoutSec 2 -ErrorAction SilentlyContinue).Count -gt 0){$ifaces+='ASUS_WMI'}
+  if(@(Get-CimClass -Namespace root/wmi -ClassName LENOVO_OTHER_METHOD -OperationTimeoutSec 2 -ErrorAction SilentlyContinue).Count -gt 0){$ifaces+='LENOVO_WMI'}
+  if(@(Get-CimClass -Namespace root/wmi -OperationTimeoutSec 2 -ErrorAction SilentlyContinue|Where-Object CimClassName -match 'Uniwill|Tongfang').Count -gt 0){$ifaces+='UNIWILL_WMI'}
+  if(@(Get-CimClass -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature -OperationTimeoutSec 2 -ErrorAction SilentlyContinue).Count -gt 0){$ifaces+='ACPI_THERMAL'}
+  if(@(Get-CimClass -Namespace root/wmi -ClassName WmiMonitorBrightness -OperationTimeoutSec 2 -ErrorAction SilentlyContinue).Count -gt 0){$ifaces+='WMI_BRIGHTNESS'}
+  $r.interfaces=$ifaces
+ }catch{}
  $r|ConvertTo-Json -Depth 4 -Compress
  """;
     private const string ModeScript = """

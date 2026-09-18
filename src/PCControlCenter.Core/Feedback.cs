@@ -69,7 +69,20 @@ public static class Feedback
             if (displays.ValueKind != JsonValueKind.Array || displays.GetArrayLength() > 8)
                 throw new InvalidDataException("INVALID_DISPLAYS");
             var drivers = displays.EnumerateArray().Select(d => new DisplayDetails(Field(d, "Name"), Field(d, "DriverVersion"), d.TryGetProperty("Source", out _) ? Field(d, "Source") : "Unknown")).ToArray();
-            system = new(Field(details, "OsVersion"), Field(details, "OsBuild"), Field(details, "CpuName"), Field(details, "BoardMaker"), Field(details, "BoardProduct"), drivers);
+            IReadOnlyList<string>? discovered = null;
+            if (details.TryGetProperty("DiscoveredInterfaces", out var ifaceArr) && ifaceArr.ValueKind == JsonValueKind.Array)
+            {
+                if (ifaceArr.GetArrayLength() > 32)
+                    throw new InvalidDataException("INVALID_INTERFACES");
+                discovered = ifaceArr.EnumerateArray()
+                    .Where(x => x.ValueKind == JsonValueKind.String)
+                    .Select(x => PublicText.Clean(x.GetString() ?? ""))
+                    .Where(s => s.Length > 0 && s.Length <= 160)
+                    .ToArray();
+            }
+            string? powerSource = details.TryGetProperty("PowerSource", out var ps) && ps.ValueKind == JsonValueKind.String ? PublicText.Clean(ps.GetString() ?? "") : null;
+            string? powerPlan = details.TryGetProperty("PowerPlan", out var pp) && pp.ValueKind == JsonValueKind.String ? PublicText.Clean(pp.GetString() ?? "") : null;
+            system = new(Field(details, "OsVersion"), Field(details, "OsBuild"), Field(details, "CpuName"), Field(details, "BoardMaker"), Field(details, "BoardProduct"), drivers, discovered, powerSource, powerPlan);
         }
         return new(version, Field(root, "applicationVersion"), identity, key, "UserReportedUnverified", labels, system);
     }

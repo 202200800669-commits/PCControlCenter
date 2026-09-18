@@ -50,6 +50,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<ProfileItem> Profiles { get; } = new();
     public Queue<double> CpuHistory { get; } = new();
     public Queue<double> GpuHistory { get; } = new();
+    public Snapshot? CurrentSnapshot { get; private set; }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? GraphUpdated;
@@ -173,6 +174,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             currentIdentity = new("LENOVO", "21R0", "ThinkBook 16p G6 IAX", "R2CN57WW", "Windows");
             AddLog($"识别硬件异常: {ex.Message}，采用默认设备指纹");
         }
+        try
+        {
+            var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
+            var provider = registry.Resolve(currentIdentity);
+            CurrentSnapshot = await provider.ReadAsync(currentIdentity, ct);
+        }
+        catch { }
         await RefreshTelemetryAsync(ct);
     }
 
