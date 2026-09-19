@@ -56,7 +56,8 @@ public sealed class ProfilesView : StackPanel
         saveBtn.Click += (s, e) =>
         {
             string name = profileNameBox.Text.Trim();
-            if (string.IsNullOrEmpty(name)) return;
+            if (string.IsNullOrEmpty(name))
+                return;
             int mode = new[] { 0, 1, 3 }[modeCombo.SelectedIndex];
             var existing = vm.Profiles.FirstOrDefault(x => x.Name == name);
             if (existing != null)

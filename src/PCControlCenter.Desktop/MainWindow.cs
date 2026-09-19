@@ -102,8 +102,14 @@ public sealed class MainWindow : Window
     private void BuildShell()
     {
         var outer = new Grid();
-        outer.RowDefinitions.Add(new() { Height = new GridLength(38) });
-        outer.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
+        outer.RowDefinitions.Add(new()
+        {
+            Height = new GridLength(38)
+        });
+        outer.RowDefinitions.Add(new()
+        {
+            Height = new GridLength(1, GridUnitType.Star)
+        });
         Content = outer;
 
         // Title Bar
@@ -144,8 +150,14 @@ public sealed class MainWindow : Window
         var body = new Grid();
         Grid.SetRow(body, 1);
         outer.Children.Add(body);
-        body.ColumnDefinitions.Add(new() { Width = new GridLength(180) });
-        body.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        body.ColumnDefinitions.Add(new()
+        {
+            Width = new GridLength(180)
+        });
+        body.ColumnDefinitions.Add(new()
+        {
+            Width = new GridLength(1, GridUnitType.Star)
+        });
 
         // Sidebar
         var sidebar = new DockPanel { Margin = new Thickness(16, 16, 12, 18) };
@@ -195,9 +207,18 @@ public sealed class MainWindow : Window
         var mainArea = new Grid { Margin = new Thickness(16, 10, 24, 16) };
         Grid.SetColumn(mainArea, 1);
         body.Children.Add(mainArea);
-        mainArea.RowDefinitions.Add(new() { Height = GridLength.Auto });
-        mainArea.RowDefinitions.Add(new() { Height = new GridLength(1, GridUnitType.Star) });
-        mainArea.RowDefinitions.Add(new() { Height = GridLength.Auto });
+        mainArea.RowDefinitions.Add(new()
+        {
+            Height = GridLength.Auto
+        });
+        mainArea.RowDefinitions.Add(new()
+        {
+            Height = new GridLength(1, GridUnitType.Star)
+        });
+        mainArea.RowDefinitions.Add(new()
+        {
+            Height = GridLength.Auto
+        });
 
         // Heading
         var heading = new DockPanel { Margin = new Thickness(6, 0, 0, 18) };
@@ -249,7 +270,8 @@ public sealed class MainWindow : Window
 
     private void Navigate(string key)
     {
-        if (!pages.TryGetValue(key, out var view)) return;
+        if (!pages.TryGetValue(key, out var view))
+            return;
         contentHost.Content = view;
         pageTitle.Text = key switch
         {

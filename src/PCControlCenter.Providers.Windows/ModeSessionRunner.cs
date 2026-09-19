@@ -42,7 +42,11 @@ public static class ModeSessionRunner
 
         if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(25), stop)) != exited)
         {
-            try { process.Kill(); } catch { }
+            try
+            {
+                process.Kill();
+            }
+            catch { }
             return new("WORKER_TIMEOUT", request.Mode, Recovery: "UNCONFIRMED");
         }
 

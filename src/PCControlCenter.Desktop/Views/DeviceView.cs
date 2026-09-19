@@ -94,7 +94,11 @@ public sealed class DeviceView : StackPanel
         var b = new Button { Content = text, Margin = new Thickness(0, 0, 8, 8), Padding = new Thickness(14, 8, 14, 8) };
         b.Click += (s, e) =>
         {
-            try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { }
+            try
+            {
+                Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
+            }
+            catch { }
         };
         return b;
     }

@@ -31,7 +31,8 @@ public static class SystemMetrics
 
     public static double ReadCpuLoad()
     {
-        if (!OperatingSystem.IsWindows()) return 0;
+        if (!OperatingSystem.IsWindows())
+            return 0;
         try
         {
             if (GetSystemTimes(out ulong idle, out ulong kernel, out ulong user))
@@ -54,7 +55,8 @@ public static class SystemMetrics
 
     public static (double UsedGb, double TotalGb, double LoadPercent) ReadMemory()
     {
-        if (!OperatingSystem.IsWindows()) return (0, 0, 0);
+        if (!OperatingSystem.IsWindows())
+            return (0, 0, 0);
         try
         {
             var mem = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
@@ -71,7 +73,8 @@ public static class SystemMetrics
 
     public static string ReadBattery()
     {
-        if (!OperatingSystem.IsWindows()) return "电池状态暂不可用";
+        if (!OperatingSystem.IsWindows())
+            return "电池状态暂不可用";
         try
         {
             var p = Forms.SystemInformation.PowerStatus;

@@ -85,7 +85,8 @@ static class ModeWorkerTests
         }
         finally
         {
-            if (!process.HasExited) process.Kill(true);
+            if (!process.HasExited)
+                process.Kill(true);
         }
     }
 

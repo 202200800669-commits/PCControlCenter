@@ -25,8 +25,9 @@ body:
   - type: textarea
     id: diagnostics
     attributes:
-      label: 只读检测结果或诊断包
-      description: 上传前查看 diagnostics.json，删除不希望公开的内容。
+      label: 只读检测结果 / GitHub 模板输出
+      description: 可直接在桌面端设置页点击“复制 GitHub 反馈模板”，或在终端运行“pc-control feedback-template”并将输出粘贴在此处；也可上传 diagnostics.json 脱敏包。
+      placeholder: 请在此粘贴 pc-control feedback-template 生成的 Markdown 文本或 diagnostics.json 脱敏内容
   - type: textarea
     id: requested
     attributes:

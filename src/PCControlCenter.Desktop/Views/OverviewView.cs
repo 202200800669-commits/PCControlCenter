@@ -39,8 +39,14 @@ public sealed class OverviewView : StackPanel
     {
         // Hero Card
         var heroLayout = new Grid();
-        heroLayout.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-        heroLayout.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+        heroLayout.ColumnDefinitions.Add(new()
+        {
+            Width = new GridLength(1, GridUnitType.Star)
+        });
+        heroLayout.ColumnDefinitions.Add(new()
+        {
+            Width = GridLength.Auto
+        });
 
         var titleStack = Stack(
             Text(vm.DeviceTitle, 26, "#1C4965"),
@@ -138,7 +144,8 @@ public sealed class OverviewView : StackPanel
     {
         double w = graph.ActualWidth;
         double h = graph.Height;
-        if (w < 10 || h < 10) return;
+        if (w < 10 || h < 10)
+            return;
         graph.Children.Clear();
 
         // Grid lines
@@ -163,7 +170,8 @@ public sealed class OverviewView : StackPanel
 
     private void DrawSeries(double[] data, string colorHex, double w, double h)
     {
-        if (data.Length < 2) return;
+        if (data.Length < 2)
+            return;
         var line = new Polyline { Stroke = Brush(colorHex), StrokeThickness = 2 };
         for (int i = 0; i < data.Length; i++)
         {

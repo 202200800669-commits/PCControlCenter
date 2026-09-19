@@ -61,9 +61,12 @@ static class EnergyWorkerTests
         script = script.Replace(prodEnergyMutex, energyMutex ?? "Local\\PCControlCenter.TestEnergy." + Guid.NewGuid().ToString("N"));
 
         var prefix = $"$kind='{s.Kind}';$value={s.TargetValue};$wrongModel=${s.WrongModel};$failCommand=${s.FailCommand};$failConfirm=${s.FailConfirm};";
-        if (s.Kind == "charge") prefix += $"$script:simCharge={s.InitialValue};";
-        else if (s.Kind == "key") prefix += $"$script:simKey={s.InitialValue};";
-        else if (s.Kind == "night") prefix += $"$script:simNight={s.InitialValue};";
+        if (s.Kind == "charge")
+            prefix += $"$script:simCharge={s.InitialValue};";
+        else if (s.Kind == "key")
+            prefix += $"$script:simKey={s.InitialValue};";
+        else if (s.Kind == "night")
+            prefix += $"$script:simNight={s.InitialValue};";
 
         var body = MockEnvironment + "\n" + prefix + "\n" + script + "\nConvertTo-Json -InputObject @($script:energyWrites.ToArray()) -Compress";
 
@@ -93,7 +96,8 @@ static class EnergyWorkerTests
         }
         finally
         {
-            if (!process.HasExited) process.Kill(true);
+            if (!process.HasExited)
+                process.Kill(true);
         }
     }
 

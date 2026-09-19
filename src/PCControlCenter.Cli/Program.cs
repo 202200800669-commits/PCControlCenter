@@ -21,7 +21,11 @@ if (args is ["feedback-template"] || args is ["feedback-template", var destMd])
         var md = Diagnostics.FormatGitHubIssueMarkdown(snap);
         if (args is ["feedback-template", var dest])
         {
-            if (File.Exists(dest)) { Console.Error.WriteLine("目标文件已存在，不覆盖。"); return 12; }
+            if (File.Exists(dest))
+            {
+                Console.Error.WriteLine("目标文件已存在，不覆盖。");
+                return 12;
+            }
             await File.WriteAllTextAsync(dest, md, Encoding.UTF8);
             Console.WriteLine($"已生成 GitHub Issue 反馈模板至: {dest}");
         }
@@ -73,7 +77,8 @@ EnergyRequest? energyRequest = null;
 if (args is ["energy", var kindStr, var valStr] && int.TryParse(valStr, out var ev))
 {
     var candidate = new EnergyRequest(kindStr, ev);
-    if (candidate.IsValid) energyRequest = candidate;
+    if (candidate.IsValid)
+        energyRequest = candidate;
 }
 if (args is ["energy", ..] && energyRequest is null) { Console.Error.WriteLine("参数无效：energy charge <0-2>（0=普通, 1=养护, 2=快充）/ energy key <0-3>（0=关, 1=低, 2=高, 3=自动）/ energy night <0-1>。"); return 2; }
 if (trial is not null && !trial.IsValid) { Console.Error.WriteLine("参数无效：转速 1500–5500 RPM，时限 5–30 秒。"); return 2; }

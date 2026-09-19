@@ -21,10 +21,23 @@ public static class UIFactory
     }
 
     public static TextBlock Text(string text, double size = 13, string color = "#66809B") =>
-        new() { Text = text, FontSize = size, Foreground = Brush(color), TextWrapping = TextWrapping.Wrap };
+        new()
+        {
+            Text = text,
+            FontSize = size,
+            Foreground = Brush(color),
+            TextWrapping = TextWrapping.Wrap
+        };
 
     public static TextBlock Head(string title) =>
-        new() { Text = title, FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = Brush("#173C58"), Margin = new Thickness(0, 0, 0, 12) };
+        new()
+        {
+            Text = title,
+            FontSize = 16,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = Brush("#173C58"),
+            Margin = new Thickness(0, 0, 0, 12)
+        };
 
     public static Border Card(UIElement child) => new()
     {
@@ -40,23 +53,34 @@ public static class UIFactory
     public static StackPanel Stack(params UIElement[] children)
     {
         var s = new StackPanel();
-        foreach (var c in children) s.Children.Add(c);
+        foreach (var c in children)
+            s.Children.Add(c);
         return s;
     }
 
     public static WrapPanel Row(params UIElement[] children)
     {
         var w = new WrapPanel();
-        foreach (var c in children) w.Children.Add(c);
+        foreach (var c in children)
+            w.Children.Add(c);
         return w;
     }
 
     public static Grid Two(UIElement a, UIElement b)
     {
         var g = new Grid();
-        g.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
-        g.ColumnDefinitions.Add(new() { Width = new GridLength(16) });
-        g.ColumnDefinitions.Add(new() { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new()
+        {
+            Width = new GridLength(1, GridUnitType.Star)
+        });
+        g.ColumnDefinitions.Add(new()
+        {
+            Width = new GridLength(16)
+        });
+        g.ColumnDefinitions.Add(new()
+        {
+            Width = new GridLength(1, GridUnitType.Star)
+        });
         g.Children.Add(a);
         Grid.SetColumn(b, 2);
         g.Children.Add(b);

@@ -42,7 +42,11 @@ public static class EnergySessionRunner
 
         if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(20), stop)) != exited)
         {
-            try { process.Kill(); } catch { }
+            try
+            {
+                process.Kill();
+            }
+            catch { }
             return new("WORKER_TIMEOUT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
         }
 

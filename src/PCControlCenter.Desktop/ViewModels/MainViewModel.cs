@@ -50,7 +50,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ObservableCollection<ProfileItem> Profiles { get; } = new();
     public Queue<double> CpuHistory { get; } = new();
     public Queue<double> GpuHistory { get; } = new();
-    public Snapshot? CurrentSnapshot { get; private set; }
+    public Snapshot? CurrentSnapshot
+    {
+        get; private set;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     public event Action? GraphUpdated;
@@ -58,19 +61,111 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private void Notify([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
-    public string DeviceTitle { get => deviceTitle; set { deviceTitle = value; Notify(); } }
-    public string CpuName { get => cpuName; set { cpuName = value; Notify(); } }
-    public string CpuLoadText { get => cpuLoadText; set { cpuLoadText = value; Notify(); } }
-    public double CpuLoad { get => cpuLoad; set { cpuLoad = value; Notify(); } }
-    public string GpuLoadText { get => gpuLoadText; set { gpuLoadText = value; Notify(); } }
-    public double GpuLoad { get => gpuLoad; set { gpuLoad = value; Notify(); } }
-    public string GpuTempText { get => gpuTempText; set { gpuTempText = value; Notify(); } }
-    public string GpuDetailText { get => gpuDetailText; set { gpuDetailText = value; Notify(); } }
-    public string MemoryText { get => memoryText; set { memoryText = value; Notify(); } }
-    public double MemoryLoad { get => memoryLoad; set { memoryLoad = value; Notify(); } }
-    public string BatteryText { get => batteryText; set { batteryText = value; Notify(); } }
-    public int Brightness { get => brightness; set { brightness = value; Notify(); } }
-    public int PerformanceMode { get => performanceMode; set { performanceMode = value; Notify(); Notify(nameof(PerformanceModeName)); } }
+    public string DeviceTitle
+    {
+        get => deviceTitle; set
+        {
+            deviceTitle = value;
+            Notify();
+        }
+    }
+    public string CpuName
+    {
+        get => cpuName; set
+        {
+            cpuName = value;
+            Notify();
+        }
+    }
+    public string CpuLoadText
+    {
+        get => cpuLoadText; set
+        {
+            cpuLoadText = value;
+            Notify();
+        }
+    }
+    public double CpuLoad
+    {
+        get => cpuLoad; set
+        {
+            cpuLoad = value;
+            Notify();
+        }
+    }
+    public string GpuLoadText
+    {
+        get => gpuLoadText; set
+        {
+            gpuLoadText = value;
+            Notify();
+        }
+    }
+    public double GpuLoad
+    {
+        get => gpuLoad; set
+        {
+            gpuLoad = value;
+            Notify();
+        }
+    }
+    public string GpuTempText
+    {
+        get => gpuTempText; set
+        {
+            gpuTempText = value;
+            Notify();
+        }
+    }
+    public string GpuDetailText
+    {
+        get => gpuDetailText; set
+        {
+            gpuDetailText = value;
+            Notify();
+        }
+    }
+    public string MemoryText
+    {
+        get => memoryText; set
+        {
+            memoryText = value;
+            Notify();
+        }
+    }
+    public double MemoryLoad
+    {
+        get => memoryLoad; set
+        {
+            memoryLoad = value;
+            Notify();
+        }
+    }
+    public string BatteryText
+    {
+        get => batteryText; set
+        {
+            batteryText = value;
+            Notify();
+        }
+    }
+    public int Brightness
+    {
+        get => brightness; set
+        {
+            brightness = value;
+            Notify();
+        }
+    }
+    public int PerformanceMode
+    {
+        get => performanceMode; set
+        {
+            performanceMode = value;
+            Notify();
+            Notify(nameof(PerformanceModeName));
+        }
+    }
     public string PerformanceModeName => performanceMode switch
     {
         0 => "智能模式 (均衡)",
@@ -78,20 +173,118 @@ public sealed class MainViewModel : INotifyPropertyChanged
         3 => "性能模式 (野兽)",
         _ => "未识别 / 需读取"
     };
-    public int? Fan1Rpm { get => fan1Rpm; set { fan1Rpm = value; Notify(); } }
-    public int? Fan2Rpm { get => fan2Rpm; set { fan2Rpm = value; Notify(); } }
-    public string FanText { get => fanText; set { fanText = value; Notify(); } }
-    public string FanStateText { get => fanStateText; set { fanStateText = value; Notify(); } }
-    public int EnergyCharge { get => energyCharge; set { energyCharge = value; Notify(); } }
-    public int EnergyNight { get => energyNight; set { energyNight = value; Notify(); } }
-    public int EnergyKey { get => energyKey; set { energyKey = value; Notify(); } }
-    public string StatusText { get => statusText; set { statusText = value; Notify(); } }
-    public string LogText { get => logText; set { logText = value; Notify(); } }
-    public bool IsBusy { get => isBusy; set { isBusy = value; Notify(); } }
-    public string AccentColor { get => accentColor; set { accentColor = value; Notify(); } }
-    public bool MinimizeToTray { get => minimizeToTray; set { minimizeToTray = value; Notify(); } }
-    public int PollIntervalSeconds { get => pollIntervalSeconds; set { pollIntervalSeconds = value; Notify(); } }
-    public ProfileItem? SelectedProfile { get => selectedProfile; set { selectedProfile = value; Notify(); } }
+    public int? Fan1Rpm
+    {
+        get => fan1Rpm; set
+        {
+            fan1Rpm = value;
+            Notify();
+        }
+    }
+    public int? Fan2Rpm
+    {
+        get => fan2Rpm; set
+        {
+            fan2Rpm = value;
+            Notify();
+        }
+    }
+    public string FanText
+    {
+        get => fanText; set
+        {
+            fanText = value;
+            Notify();
+        }
+    }
+    public string FanStateText
+    {
+        get => fanStateText; set
+        {
+            fanStateText = value;
+            Notify();
+        }
+    }
+    public int EnergyCharge
+    {
+        get => energyCharge; set
+        {
+            energyCharge = value;
+            Notify();
+        }
+    }
+    public int EnergyNight
+    {
+        get => energyNight; set
+        {
+            energyNight = value;
+            Notify();
+        }
+    }
+    public int EnergyKey
+    {
+        get => energyKey; set
+        {
+            energyKey = value;
+            Notify();
+        }
+    }
+    public string StatusText
+    {
+        get => statusText; set
+        {
+            statusText = value;
+            Notify();
+        }
+    }
+    public string LogText
+    {
+        get => logText; set
+        {
+            logText = value;
+            Notify();
+        }
+    }
+    public bool IsBusy
+    {
+        get => isBusy; set
+        {
+            isBusy = value;
+            Notify();
+        }
+    }
+    public string AccentColor
+    {
+        get => accentColor; set
+        {
+            accentColor = value;
+            Notify();
+        }
+    }
+    public bool MinimizeToTray
+    {
+        get => minimizeToTray; set
+        {
+            minimizeToTray = value;
+            Notify();
+        }
+    }
+    public int PollIntervalSeconds
+    {
+        get => pollIntervalSeconds; set
+        {
+            pollIntervalSeconds = value;
+            Notify();
+        }
+    }
+    public ProfileItem? SelectedProfile
+    {
+        get => selectedProfile; set
+        {
+            selectedProfile = value;
+            Notify();
+        }
+    }
 
     private const string RunRegKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunAppName = "PCControlCenter";
@@ -100,7 +293,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         get
         {
-            if (!OperatingSystem.IsWindows()) return false;
+            if (!OperatingSystem.IsWindows())
+                return false;
             try
             {
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegKey, false);
@@ -110,7 +304,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         set
         {
-            if (!OperatingSystem.IsWindows()) return;
+            if (!OperatingSystem.IsWindows())
+                return;
             try
             {
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegKey, true);
@@ -144,9 +339,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
             CpuHistory.Enqueue(0);
             GpuHistory.Enqueue(0);
         }
-        Profiles.Add(new() { Name = "日常办公", Mode = 0, FanKind = "auto", Brightness = 70 });
-        Profiles.Add(new() { Name = "性能优先", Mode = 3, FanKind = "auto", Brightness = 90 });
-        Profiles.Add(new() { Name = "全速散热", Mode = 0, FanKind = "full", Brightness = 80 });
+        Profiles.Add(new()
+        {
+            Name = "日常办公",
+            Mode = 0,
+            FanKind = "auto",
+            Brightness = 70
+        });
+        Profiles.Add(new()
+        {
+            Name = "性能优先",
+            Mode = 3,
+            FanKind = "auto",
+            Brightness = 90
+        });
+        Profiles.Add(new()
+        {
+            Name = "全速散热",
+            Mode = 0,
+            FanKind = "full",
+            Brightness = 80
+        });
         selectedProfile = Profiles[0];
     }
 
@@ -205,7 +418,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (gpuData.Count > 0)
             {
                 var primary = gpuData[0];
-                if (primary.Temperature.HasValue) GpuTempText = $"{primary.Temperature.Value:F0} °C";
+                if (primary.Temperature.HasValue)
+                    GpuTempText = $"{primary.Temperature.Value:F0} °C";
                 if (primary.Utilization.HasValue)
                 {
                     double gl = primary.Utilization.Value;
@@ -234,11 +448,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             // 4. Energy read-only via \\.\EnergyDrv
             int chg = EnergyReader.ReadCharge();
-            if (chg >= 0) EnergyCharge = chg;
+            if (chg >= 0)
+                EnergyCharge = chg;
             int nht = EnergyReader.ReadNight();
-            if (nht >= 0) EnergyNight = nht;
+            if (nht >= 0)
+                EnergyNight = nht;
             int key = EnergyReader.ReadKeyboard();
-            if (key >= 0) EnergyKey = key;
+            if (key >= 0)
+                EnergyKey = key;
 
             GraphUpdated?.Invoke();
             StatusText = $"已连接  ·  {DateTime.Now:HH:mm:ss}";
@@ -251,7 +468,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task SetPerformanceModeAsync(int targetMode)
     {
-        if (IsBusy || currentIdentity is null) return;
+        if (IsBusy || currentIdentity is null)
+            return;
         IsBusy = true;
         StatusText = $"正在通过 UAC 请求切换至模式 {targetMode}…";
         AddLog($"请求模式切换 -> {targetMode}");
@@ -285,7 +503,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task SetEnergyAsync(string kind, int targetValue)
     {
-        if (IsBusy || currentIdentity is null) return;
+        if (IsBusy || currentIdentity is null)
+            return;
         IsBusy = true;
         StatusText = $"正在请求配置 {kind} = {targetValue}…";
         AddLog($"请求能源设置 -> {kind} = {targetValue}");
@@ -295,9 +514,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
             if (resp.Code == "OK" && resp.EnergyReceipt is { } er)
             {
-                if (kind == "charge") EnergyCharge = er.TargetValue;
-                else if (kind == "night") EnergyNight = er.TargetValue;
-                else if (kind == "key") EnergyKey = er.TargetValue;
+                if (kind == "charge")
+                    EnergyCharge = er.TargetValue;
+                else if (kind == "night")
+                    EnergyNight = er.TargetValue;
+                else if (kind == "key")
+                    EnergyKey = er.TargetValue;
                 AddLog($"能源设置成功: {kind}={er.TargetValue}, 恢复={er.Recovery}");
                 StatusText = $"能源设置成功: {kind}={targetValue}";
             }
@@ -321,7 +543,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task ReadFansElevatedAsync()
     {
-        if (IsBusy || currentIdentity is null) return;
+        if (IsBusy || currentIdentity is null)
+            return;
         IsBusy = true;
         StatusText = "正在请求管理员提权读取风扇转速…";
         AddLog("请求 UAC 提权读取风扇转速…");
@@ -357,7 +580,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task RunFanTrialAsync(int rpm1, int rpm2, int durationSeconds)
     {
-        if (IsBusy || currentIdentity is null) return;
+        if (IsBusy || currentIdentity is null)
+            return;
         IsBusy = true;
         StatusText = $"正在启动限时试运行 ({rpm1}/{rpm2} RPM, {durationSeconds}s)…";
         AddLog($"启动风扇受控试运行: Fan1={rpm1}, Fan2={rpm2}, 持续={durationSeconds}秒");
