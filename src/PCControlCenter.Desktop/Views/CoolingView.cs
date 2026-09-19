@@ -33,7 +33,7 @@ public sealed class CoolingView : StackPanel
         var topDock = new DockPanel();
         var actions = Row(
             CreateButton("提权读取", async () => await vm.ReadFansElevatedAsync()),
-            CreateButton("恢复自动", async () => await vm.RunFanTrialAsync(1500, 1500, 5))
+            CreateButton("恢复自动", async () => await vm.RestoreFanAutoAsync())
         );
         DockPanel.SetDock(actions, Dock.Right);
         topDock.Children.Add(actions);

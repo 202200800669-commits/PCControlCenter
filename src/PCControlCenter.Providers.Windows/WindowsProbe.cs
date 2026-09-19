@@ -177,4 +177,28 @@ public sealed class WindowsProbe : IReadOnlyProbe
         }
         return new(Field("manufacturer"), Field("product"), Field("model"), Field("bios"), Field("platform"));
     }
+
+    public static void SetBrightness(int percent)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+        percent = Math.Clamp(percent, 0, 100);
+        try
+        {
+            var ps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\WindowsPowerShell\v1.0\powershell.exe");
+            var cmd = $"$m=Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue; if($m){{Invoke-CimMethod -InputObject $m -MethodName WmiSetBrightness -Arguments @{{Timeout=1;Brightness=[byte]{percent}}}}}";
+            var start = new ProcessStartInfo(ps)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command", cmd })
+                start.ArgumentList.Add(a);
+            using var p = Process.Start(start);
+            p?.WaitForExit(3000);
+        }
+        catch { }
+    }
 }

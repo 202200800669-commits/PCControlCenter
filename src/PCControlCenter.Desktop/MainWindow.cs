@@ -247,6 +247,8 @@ public sealed class MainWindow : Window
         {
             if (e.PropertyName == nameof(vm.StatusText))
                 statusLabel.Text = vm.StatusText;
+            else if (e.PropertyName == nameof(vm.PollIntervalSeconds))
+                timer.Interval = TimeSpan.FromSeconds(Math.Clamp(vm.PollIntervalSeconds, 1, 30));
         };
         statusLabel.Margin = new Thickness(6, 10, 0, 0);
         Grid.SetRow(statusLabel, 2);

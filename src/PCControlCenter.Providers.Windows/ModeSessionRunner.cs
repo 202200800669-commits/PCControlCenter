@@ -24,6 +24,7 @@ public static class ModeSessionRunner
         {
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8
@@ -36,6 +37,7 @@ public static class ModeSessionRunner
         if (!process.Start())
             return new("WORKER_START_FAILED", request.Mode, Recovery: "NOT_NEEDED");
 
+        using var registration = stop.Register(() => { try { process.StandardInput.Close(); } catch { } });
         var output = process.StandardOutput.ReadToEndAsync();
         var errors = process.StandardError.ReadToEndAsync();
         var exited = process.WaitForExitAsync();
@@ -44,10 +46,18 @@ public static class ModeSessionRunner
         {
             try
             {
-                process.Kill();
+                process.StandardInput.Close();
             }
             catch { }
-            return new("WORKER_TIMEOUT", request.Mode, Recovery: "UNCONFIRMED");
+            if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(5))) != exited)
+            {
+                try
+                {
+                    process.Kill();
+                }
+                catch { }
+                return new("WORKER_TIMEOUT", request.Mode, Recovery: "UNCONFIRMED");
+            }
         }
 
         var json = await output;

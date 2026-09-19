@@ -1,15 +1,20 @@
 # Embedded resource. All parameters are generated from validated typed values.
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+$inputReader=New-Object IO.StreamReader([Console]::OpenStandardInput())
+$stop=$inputReader.ReadLineAsync()
 
 $result=@{Code='NOT_STARTED';TargetMode=$targetMode;PreviousMode=$null;FinalMode=$null;Recovery='NOT_NEEDED'}
-$locked=$false;$mutex=$null
+$touched=$false;$locked=$false;$mutex=$null;$fanLocked=$false;$fanMutex=$null
 
 function Get-ItsMode {
     $k=Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\LenovoProcessManagement\Performance\PowerSlider' -ErrorAction Stop
     $v=$k.ITS_CurrentSetting
     if(($k.ITS_FN_Capability -band 16) -ne 0){$v=$k.ITS_CurrentSettingV}
-    return [int]$v
+    if($null -eq $v){return $null}
+    $intVal=[int]$v
+    if($intVal -notin @(0,1,3)){return $null}
+    return $intVal
 }
 
 if (!(Get-Command Send-ItsCommand -ErrorAction SilentlyContinue)) {
@@ -39,15 +44,11 @@ try {
     }
 
     $fanMutex=New-Object Threading.Mutex($false,'Global\PCControlCenter.ThinkBookFanSession')
-    $fanLocked=$false
     try{$fanLocked=$fanMutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$fanLocked=$true}
     if(!$fanLocked){
-        $fanMutex.Dispose()
         $result.Code='BUSY'
         throw 'BUSY'
     }
-    try{$fanMutex.ReleaseMutex()}catch{}
-    $fanMutex.Dispose()
 
     $mutex=New-Object Threading.Mutex($false,'Global\PCControlCenter.ThinkBookModeSession')
     try{$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
@@ -57,15 +58,22 @@ try {
     }
 
     $prev=Get-ItsMode
+    if($null -eq $prev -or $prev -notin @(0,1,3)){
+        $result.Code='INVALID_PREVIOUS_MODE'
+        throw 'INVALID_PREVIOUS_MODE'
+    }
     $result.PreviousMode=$prev
+
     if($prev -eq $targetMode){
         $result.FinalMode=$prev
         $result.Code='COMPLETED'
         $result.Recovery='NOT_NEEDED'
     } else {
+        $touched=$true
         Send-ItsCommand $targetMode
         $confirmed=$false
         for($j=0;$j -lt 15;$j++){
+            if($stop.IsCompleted){$result.Code='INTERRUPTED';break}
             Start-Sleep -Milliseconds 200
             $cur=Get-ItsMode
             if($cur -eq $targetMode){
@@ -76,35 +84,41 @@ try {
                 break
             }
         }
-        if(!$confirmed){
+        if(!$confirmed -and $result.Code -ne 'INTERRUPTED'){
             $result.Code='TARGET_NOT_REACHED'
-            try {
-                Send-ItsCommand $prev
-                for($r=0;$r -lt 10;$r++){
-                    Start-Sleep -Milliseconds 200
-                    if((Get-ItsMode) -eq $prev){
-                        $result.Recovery='RESTORED_PREVIOUS'
-                        $result.FinalMode=$prev
-                        break
-                    }
-                }
-                if($result.Recovery -ne 'RESTORED_PREVIOUS'){
-                    $result.Recovery='ROLLBACK_FAILED'
-                    $result.FinalMode=Get-ItsMode
-                }
-            } catch {
-                $result.Recovery='ROLLBACK_FAILED'
-                try{$result.FinalMode=Get-ItsMode}catch{}
-            }
         }
     }
 } catch {
-    if($result.Code -notin @('BUSY','IDENTITY_MISMATCH','SERVICE_UNAVAILABLE','TARGET_NOT_REACHED')){
+    if($result.Code -notin @('BUSY','IDENTITY_MISMATCH','SERVICE_UNAVAILABLE','TARGET_NOT_REACHED','INTERRUPTED','INVALID_PREVIOUS_MODE')){
         $result.Code='CONTROL_FAILED'
     }
 } finally {
+    if($touched -and $result.Code -ne 'COMPLETED' -and $prev -in @(0,1,3)){
+        try {
+            Send-ItsCommand $prev
+            $restored=$false
+            for($r=0;$r -lt 10;$r++){
+                Start-Sleep -Milliseconds 200
+                if((Get-ItsMode) -eq $prev){
+                    $restored=$true
+                    $result.Recovery='RESTORED_PREVIOUS'
+                    $result.FinalMode=$prev
+                    break
+                }
+            }
+            if(!$restored){
+                $result.Recovery='ROLLBACK_FAILED'
+                try{$result.FinalMode=Get-ItsMode}catch{}
+            }
+        } catch {
+            $result.Recovery='ROLLBACK_FAILED'
+            try{$result.FinalMode=Get-ItsMode}catch{}
+        }
+    }
     if($locked){try{$mutex.ReleaseMutex()}catch{}}
     if($mutex){$mutex.Dispose()}
+    if($fanLocked){try{$fanMutex.ReleaseMutex()}catch{}}
+    if($fanMutex){$fanMutex.Dispose()}
 }
 
 $result|ConvertTo-Json -Compress

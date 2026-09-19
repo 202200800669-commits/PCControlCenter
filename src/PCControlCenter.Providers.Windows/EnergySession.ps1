@@ -1,9 +1,11 @@
 # Embedded resource. All parameters are generated from validated typed values.
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
+$inputReader=New-Object IO.StreamReader([Console]::OpenStandardInput())
+$stop=$inputReader.ReadLineAsync()
 
 $result=@{Code='NOT_STARTED';Kind=$kind;TargetValue=$value;PreviousValue=$null;FinalValue=$null;Recovery='NOT_NEEDED'}
-$locked=$false;$mutex=$null
+$touched=$false;$locked=$false;$mutex=$null;$fanLocked=$false;$fanMutex=$null
 
 if (!(Get-Command Invoke-EnergyRead -ErrorAction SilentlyContinue)) {
     if (!([System.Management.Automation.PSTypeName]'EnergyBridge').Type) {
@@ -95,15 +97,11 @@ try {
     }
 
     $fanMutex=New-Object Threading.Mutex($false, 'Global\PCControlCenter.ThinkBookFanSession')
-    $fanLocked=$false
     try { $fanLocked=$fanMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $fanLocked=$true }
     if (!$fanLocked) {
-        $fanMutex.Dispose()
         $result.Code='BUSY'
         throw 'BUSY'
     }
-    try { $fanMutex.ReleaseMutex() } catch {}
-    $fanMutex.Dispose()
 
     $mutex=New-Object Threading.Mutex($false, 'Global\PCControlCenter.ThinkBookEnergySession')
     try { $locked=$mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked=$true }
@@ -113,15 +111,22 @@ try {
     }
 
     $prev = Invoke-EnergyRead $kind
+    if ($null -eq $prev) {
+        $result.Code='INVALID_PREVIOUS_VALUE'
+        throw 'INVALID_PREVIOUS_VALUE'
+    }
     $result.PreviousValue = $prev
+
     if ($prev -eq $value) {
         $result.FinalValue = $prev
         $result.Code = 'COMPLETED'
         $result.Recovery = 'NOT_NEEDED'
     } else {
+        $touched = $true
         Invoke-EnergySet $kind $value
         $confirmed = $false
         for ($j=0; $j -lt 8; $j++) {
+            if ($stop.IsCompleted) { $result.Code = 'INTERRUPTED'; break }
             Start-Sleep -Milliseconds 150
             $cur = Invoke-EnergyRead $kind
             if ($cur -eq $value) {
@@ -132,35 +137,41 @@ try {
                 break
             }
         }
-        if (!$confirmed) {
+        if (!$confirmed -and $result.Code -ne 'INTERRUPTED') {
             $result.Code = 'TARGET_NOT_REACHED'
-            try {
-                Invoke-EnergySet $kind $prev
-                for ($r=0; $r -lt 8; $r++) {
-                    Start-Sleep -Milliseconds 150
-                    if ((Invoke-EnergyRead $kind) -eq $prev) {
-                        $result.Recovery = 'RESTORED_PREVIOUS'
-                        $result.FinalValue = $prev
-                        break
-                    }
-                }
-                if ($result.Recovery -ne 'RESTORED_PREVIOUS') {
-                    $result.Recovery = 'ROLLBACK_FAILED'
-                    $result.FinalValue = Invoke-EnergyRead $kind
-                }
-            } catch {
-                $result.Recovery = 'ROLLBACK_FAILED'
-                try { $result.FinalValue = Invoke-EnergyRead $kind } catch {}
-            }
         }
     }
 } catch {
-    if ($result.Code -notin @('BUSY', 'IDENTITY_MISMATCH', 'TARGET_NOT_REACHED')) {
+    if ($result.Code -notin @('BUSY', 'IDENTITY_MISMATCH', 'TARGET_NOT_REACHED', 'INTERRUPTED', 'INVALID_PREVIOUS_VALUE')) {
         $result.Code = 'CONTROL_FAILED'
     }
 } finally {
+    if ($touched -and $result.Code -ne 'COMPLETED' -and $null -ne $prev) {
+        try {
+            Invoke-EnergySet $kind $prev
+            $restored = $false
+            for ($r=0; $r -lt 8; $r++) {
+                Start-Sleep -Milliseconds 150
+                if ((Invoke-EnergyRead $kind) -eq $prev) {
+                    $restored = $true
+                    $result.Recovery = 'RESTORED_PREVIOUS'
+                    $result.FinalValue = $prev
+                    break
+                }
+            }
+            if (!$restored) {
+                $result.Recovery = 'ROLLBACK_FAILED'
+                try { $result.FinalValue = Invoke-EnergyRead $kind } catch {}
+            }
+        } catch {
+            $result.Recovery = 'ROLLBACK_FAILED'
+            try { $result.FinalValue = Invoke-EnergyRead $kind } catch {}
+        }
+    }
     if ($locked) { try { $mutex.ReleaseMutex() } catch {} }
     if ($mutex) { $mutex.Dispose() }
+    if ($fanLocked) { try { $fanMutex.ReleaseMutex() } catch {} }
+    if ($fanMutex) { $fanMutex.Dispose() }
 }
 
 $result | ConvertTo-Json -Compress

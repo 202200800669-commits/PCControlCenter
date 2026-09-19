@@ -28,10 +28,14 @@ public sealed class DeviceView : StackPanel
     private void Build()
     {
         // Brightness Card
-        brightSlider.ValueChanged += (s, e) =>
+        brightSlider.ValueChanged += async (s, e) =>
         {
             int b = (int)brightSlider.Value;
             brightValueLabel.Text = $"{b}%";
+            if (brightSlider.IsMouseCaptureWithin || brightSlider.IsFocused)
+            {
+                await vm.SetBrightnessAsync(b);
+            }
         };
         Children.Add(Card(Stack(
             Head("屏幕显示"),
@@ -105,6 +109,11 @@ public sealed class DeviceView : StackPanel
 
     public void Update()
     {
+        if (!brightSlider.IsMouseCaptureWithin && !brightSlider.IsFocused && (int)brightSlider.Value != vm.Brightness)
+        {
+            brightSlider.Value = vm.Brightness;
+            brightValueLabel.Text = $"{vm.Brightness}%";
+        }
         chargeStateLabel.Text = vm.EnergyCharge switch
         {
             0 => "当前模式: 正常充电 (已充满或常规充电中)",

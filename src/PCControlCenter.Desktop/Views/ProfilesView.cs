@@ -47,8 +47,17 @@ public sealed class ProfilesView : StackPanel
         {
             if (vm.SelectedProfile is ProfileItem p)
             {
-                vm.AddLog($"正在应用场景配置: {p.Name} (模式={p.Mode}, 亮度={p.Brightness})");
+                vm.AddLog($"正在应用场景配置: {p.Name} (模式={p.Mode}, 亮度={p.Brightness}, 风扇={p.FanKind})");
                 await vm.SetPerformanceModeAsync(p.Mode);
+                await vm.SetBrightnessAsync(p.Brightness);
+                if (p.FanKind == "full")
+                {
+                    await vm.RunFanTrialAsync(5000, 5000, 30);
+                }
+                else if (p.FanKind == "auto")
+                {
+                    await vm.RestoreFanAutoAsync();
+                }
             }
         };
 
@@ -71,6 +80,7 @@ public sealed class ProfilesView : StackPanel
                 vm.Profiles.Add(newProfile);
                 profileList.SelectedItem = newProfile;
             }
+            vm.SaveProfiles();
             vm.AddLog($"已保存场景预设: {name}");
         };
 

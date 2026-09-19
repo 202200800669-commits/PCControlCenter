@@ -100,16 +100,11 @@ public sealed class SettingsView : StackPanel
         // Actions Card
         var actionsRow = Row(
             CreateActionButton("程序目录", () => Process.Start(new ProcessStartInfo(AppContext.BaseDirectory) { UseShellExecute = true })),
-            CreateActionButton("复制 GitHub 反馈模板", () =>
+            CreateActionButton("复制 GitHub 反馈模板", async () =>
             {
                 try
                 {
-                    var snap = vm.CurrentSnapshot;
-                    if (snap is null)
-                    {
-                        MessageBox.Show("尚未获取到设备硬件快照，请稍候片刻重试。", "提示");
-                        return;
-                    }
+                    var snap = await vm.GetFreshSnapshotAsync();
                     var md = PCControlCenter.Core.Diagnostics.FormatGitHubIssueMarkdown(snap);
                     Clipboard.SetText(md);
                     vm.AddLog("已成功将 GitHub 适配反馈模板复制到剪贴板。");
@@ -120,16 +115,11 @@ public sealed class SettingsView : StackPanel
                     MessageBox.Show($"生成反馈模板异常: {ex.Message}", "错误");
                 }
             }),
-            CreateActionButton("导出脱敏反馈", () =>
+            CreateActionButton("导出脱敏反馈", async () =>
             {
                 try
                 {
-                    var snap = vm.CurrentSnapshot;
-                    if (snap is null)
-                    {
-                        MessageBox.Show("尚未获取到设备硬件快照，请稍候片刻重试。", "提示");
-                        return;
-                    }
+                    var snap = await vm.GetFreshSnapshotAsync();
                     var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
                     var zipPath = Path.Combine(desktopPath, $"pc-control-feedback-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
                     PCControlCenter.Core.Diagnostics.Export(snap, zipPath);

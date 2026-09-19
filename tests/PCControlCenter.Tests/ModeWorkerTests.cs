@@ -7,7 +7,7 @@ static class ModeWorkerTests
 {
     private const string MockEnvironment = @"
  $script:commands=New-Object Collections.Generic.List[int]
- $script:simulatedMode=0
+ if($null -eq $script:simulatedMode){$script:simulatedMode=0}
  function Get-CimInstance {
   param([string]$ClassName,[string]$Namespace,[int]$OperationTimeoutSec,[string[]]$Property)
   switch($ClassName) {
@@ -100,6 +100,11 @@ static class ModeWorkerTests
               normal.Receipt.GetProperty("FinalMode").GetInt32() == 1 &&
               normal.Commands.GetArrayLength() == 1 &&
               normal.Commands[0].GetInt32() == 164, "mode switch 0 to 1 sends command 164 and completes");
+
+        var nonZeroInitial = await RunAsync(new(TargetMode: 1, InitialMode: 3));
+        check(nonZeroInitial.Receipt.GetProperty("Code").GetString() == "COMPLETED" &&
+              nonZeroInitial.Receipt.GetProperty("PreviousMode").GetInt32() == 3 &&
+              nonZeroInitial.Receipt.GetProperty("FinalMode").GetInt32() == 1, "mode switch 3 to 1 retains non-zero previous mode");
 
         var redundant = await RunAsync(new(TargetMode: 0, InitialMode: 0));
         check(redundant.Receipt.GetProperty("Code").GetString() == "COMPLETED" &&

@@ -45,5 +45,19 @@ static class DesktopViewModelTests
         check(used >= 0 && total >= 0 && pct >= 0, "memory metrics return non-negative values");
         string bat = SystemMetrics.ReadBattery();
         check(!string.IsNullOrWhiteSpace(bat), "battery text is non-empty");
+
+        // 6. Fan Trial Request Modes
+        var autoTrial = new PCControlCenter.Core.FanTrial("auto", 0, 0, 0);
+        check(autoTrial.IsValid, "auto fan trial requires 0 lease and 0 rpm");
+        var badAuto = new PCControlCenter.Core.FanTrial("auto", 1500, 1500, 5);
+        check(!badAuto.IsValid, "auto fan trial rejects non-zero rpm or lease");
+        var manualTrial = new PCControlCenter.Core.FanTrial("manual", 1500, 1500, 5);
+        check(manualTrial.IsValid, "manual fan trial accepts bounded rpm and lease");
+
+        // 7. Brightness Clamping
+        vm.SetBrightnessAsync(150).GetAwaiter().GetResult();
+        check(vm.Brightness == 100, "brightness is clamped to maximum 100");
+        vm.SetBrightnessAsync(-10).GetAwaiter().GetResult();
+        check(vm.Brightness == 0, "brightness is clamped to minimum 0");
     }
 }

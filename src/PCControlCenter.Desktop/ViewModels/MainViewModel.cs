@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -46,6 +48,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private bool minimizeToTray = true;
     private int pollIntervalSeconds = 3;
     private ProfileItem? selectedProfile;
+    private CancellationTokenSource? activeFanTrialCts;
+    private DateTime lastErrorTimestamp = DateTime.MinValue;
+    private readonly SemaphoreSlim refreshGate = new(1, 1);
+
+    public bool IsThinkBookSupported => currentIdentity is { Manufacturer: "LENOVO", Product: "21R0" };
 
     public ObservableCollection<ProfileItem> Profiles { get; } = new();
     public Queue<double> CpuHistory { get; } = new();
@@ -339,6 +346,50 @@ public sealed class MainViewModel : INotifyPropertyChanged
             CpuHistory.Enqueue(0);
             GpuHistory.Enqueue(0);
         }
+        LoadProfiles();
+    }
+
+    private static string ProfilesFilePath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PCControlCenter", "profiles.json");
+
+    public void SaveProfiles()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(ProfilesFilePath);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+            var json = JsonSerializer.Serialize(Profiles, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(ProfilesFilePath, json);
+            AddLog("场景配置已持久化至本地存储");
+        }
+        catch (Exception ex)
+        {
+            AddLog($"保存场景配置失败: {ex.Message}");
+        }
+    }
+
+    public void LoadProfiles()
+    {
+        try
+        {
+            if (File.Exists(ProfilesFilePath))
+            {
+                var json = File.ReadAllText(ProfilesFilePath);
+                var items = JsonSerializer.Deserialize<List<ProfileItem>>(json);
+                if (items != null && items.Count > 0)
+                {
+                    Profiles.Clear();
+                    foreach (var item in items)
+                        Profiles.Add(item);
+                    SelectedProfile = Profiles[0];
+                    return;
+                }
+            }
+        }
+        catch { }
+
+        Profiles.Clear();
         Profiles.Add(new()
         {
             Name = "日常办公",
@@ -384,8 +435,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
-            currentIdentity = new("LENOVO", "21R0", "ThinkBook 16p G6 IAX", "R2CN57WW", "Windows");
-            AddLog($"识别硬件异常: {ex.Message}，采用默认设备指纹");
+            currentIdentity = new("Unknown", "GenericPC", "通用计算机 (未匹配参考机)", "Unknown", "Windows");
+            DeviceTitle = currentIdentity.Model;
+            AddLog($"识别硬件异常: {ex.Message}，采用通用只读模式");
         }
         try
         {
@@ -397,8 +449,43 @@ public sealed class MainViewModel : INotifyPropertyChanged
         await RefreshTelemetryAsync(ct);
     }
 
+    public async Task<Snapshot> GetFreshSnapshotAsync(CancellationToken ct = default)
+    {
+        if (currentIdentity != null)
+        {
+            try
+            {
+                var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
+                var provider = registry.Resolve(currentIdentity);
+                var fresh = await provider.ReadAsync(currentIdentity, ct);
+                CurrentSnapshot = fresh;
+                return fresh;
+            }
+            catch { }
+        }
+        return CurrentSnapshot ?? new Snapshot("unknown", currentIdentity ?? new("Unknown", "GenericPC", "PC", "Unknown", "Windows"), [], [], []);
+    }
+
+    public async Task SetBrightnessAsync(int percent)
+    {
+        percent = Math.Clamp(percent, 0, 100);
+        Brightness = percent;
+        AddLog($"设置屏幕亮度 -> {percent}%");
+        try
+        {
+            await Task.Run(() => WindowsProbe.SetBrightness(percent));
+            StatusText = $"屏幕亮度已调整为 {percent}%";
+        }
+        catch (Exception ex)
+        {
+            AddLog($"设置屏幕亮度失败: {ex.Message}");
+        }
+    }
+
     public async Task RefreshTelemetryAsync(CancellationToken ct = default)
     {
+        if (!await refreshGate.WaitAsync(0, ct))
+            return;
         try
         {
             // 1. CPU & Memory & Battery
@@ -420,6 +507,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 var primary = gpuData[0];
                 if (primary.Temperature.HasValue)
                     GpuTempText = $"{primary.Temperature.Value:F0} °C";
+                else
+                    GpuTempText = "—";
                 if (primary.Utilization.HasValue)
                 {
                     double gl = primary.Utilization.Value;
@@ -428,41 +517,70 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     GpuHistory.Dequeue();
                     GpuHistory.Enqueue(gl);
                 }
+                else
+                {
+                    GpuLoadText = "—";
+                    GpuHistory.Dequeue();
+                    GpuHistory.Enqueue(0);
+                }
                 string pwr = primary.Power.HasValue ? $"{primary.Power.Value:F1} W" : "— W";
-                GpuDetailText = $"负载 {primary.Utilization:F0}%  ·  {pwr}  ·  NVIDIA 5060";
+                GpuDetailText = $"负载 {primary.Utilization:F0}%  ·  {pwr}  ·  NVIDIA GPU (Index {primary.Index})";
             }
             else
             {
+                GpuLoadText = "—";
+                GpuTempText = "—";
+                GpuDetailText = "未检测到独立显卡或处于深度休眠";
                 GpuHistory.Dequeue();
                 GpuHistory.Enqueue(0);
             }
 
-            // 3. Performance Mode (Non-elevated registry check)
-            try
+            // 3. Performance Mode & Energy (Only on supported ThinkBook)
+            if (IsThinkBookSupported)
             {
-                var modeData = await probe.QueryAsync(ProbeKind.ThinkBookMode, ct);
-                if (modeData.TryGetProperty("mode", out var m))
-                    PerformanceMode = m.GetInt32();
-            }
-            catch { }
+                try
+                {
+                    var modeData = await probe.QueryAsync(ProbeKind.ThinkBookMode, ct);
+                    if (modeData.TryGetProperty("mode", out var m))
+                        PerformanceMode = m.GetInt32();
+                }
+                catch { }
 
-            // 4. Energy read-only via \\.\EnergyDrv
-            int chg = EnergyReader.ReadCharge();
-            if (chg >= 0)
-                EnergyCharge = chg;
-            int nht = EnergyReader.ReadNight();
-            if (nht >= 0)
-                EnergyNight = nht;
-            int key = EnergyReader.ReadKeyboard();
-            if (key >= 0)
-                EnergyKey = key;
+                int chg = EnergyReader.ReadCharge();
+                if (chg >= 0)
+                    EnergyCharge = chg;
+                int nht = EnergyReader.ReadNight();
+                if (nht >= 0)
+                    EnergyNight = nht;
+                int key = EnergyReader.ReadKeyboard();
+                if (key >= 0)
+                    EnergyKey = key;
+            }
+
+            if (currentIdentity != null)
+            {
+                try
+                {
+                    var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
+                    var provider = registry.Resolve(currentIdentity);
+                    CurrentSnapshot = await provider.ReadAsync(currentIdentity, ct);
+                }
+                catch { }
+            }
 
             GraphUpdated?.Invoke();
-            StatusText = $"已连接  ·  {DateTime.Now:HH:mm:ss}";
+            if (DateTime.UtcNow - lastErrorTimestamp > TimeSpan.FromSeconds(5))
+            {
+                StatusText = $"已连接  ·  {DateTime.Now:HH:mm:ss}";
+            }
         }
         catch (Exception ex)
         {
             StatusText = $"遥测刷新异常: {ex.Message}";
+        }
+        finally
+        {
+            refreshGate.Release();
         }
     }
 
@@ -479,20 +597,36 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
             if (resp.Code == "OK" && resp.ModeReceipt is { } mr)
             {
-                PerformanceMode = mr.TargetMode;
-                AddLog($"模式切换成功: 当前模式={mr.TargetMode}, 恢复状态={mr.Recovery}");
-                StatusText = $"模式切换完成 ({PerformanceModeName})";
+                if (mr.Code == "COMPLETED")
+                {
+                    PerformanceMode = mr.FinalMode ?? mr.TargetMode;
+                    AddLog($"模式切换成功: 当前模式={PerformanceMode}, 恢复状态={mr.Recovery}");
+                    StatusText = $"模式切换完成 ({PerformanceModeName})";
+                }
+                else
+                {
+                    if (mr.FinalMode.HasValue)
+                        PerformanceMode = mr.FinalMode.Value;
+                    else if (mr.PreviousMode.HasValue)
+                        PerformanceMode = mr.PreviousMode.Value;
+
+                    AddLog($"模式切换未成功: Code={mr.Code}, 恢复={mr.Recovery}, 当前模式={PerformanceMode}");
+                    StatusText = $"模式切换未成功 ({mr.Code}), 恢复: {mr.Recovery}";
+                    lastErrorTimestamp = DateTime.UtcNow;
+                }
             }
             else
             {
-                AddLog($"模式切换未完全成功: Code={resp.Code}, 回执={resp.ModeReceipt?.Recovery}");
-                StatusText = $"模式切换提示: {resp.Code}";
+                AddLog($"模式切换失败: BrokerCode={resp.Code}");
+                StatusText = $"模式切换失败: {resp.Code}";
+                lastErrorTimestamp = DateTime.UtcNow;
             }
         }
         catch (Exception ex)
         {
             AddLog($"模式切换失败: {ex.Message}");
             StatusText = $"操作失败: {ex.Message}";
+            lastErrorTimestamp = DateTime.UtcNow;
         }
         finally
         {
@@ -514,25 +648,47 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
             if (resp.Code == "OK" && resp.EnergyReceipt is { } er)
             {
-                if (kind == "charge")
-                    EnergyCharge = er.TargetValue;
-                else if (kind == "night")
-                    EnergyNight = er.TargetValue;
-                else if (kind == "key")
-                    EnergyKey = er.TargetValue;
-                AddLog($"能源设置成功: {kind}={er.TargetValue}, 恢复={er.Recovery}");
-                StatusText = $"能源设置成功: {kind}={targetValue}";
+                if (er.Code == "COMPLETED")
+                {
+                    int finalVal = er.FinalValue ?? er.TargetValue;
+                    if (kind == "charge")
+                        EnergyCharge = finalVal;
+                    else if (kind == "night")
+                        EnergyNight = finalVal;
+                    else if (kind == "key")
+                        EnergyKey = finalVal;
+                    AddLog($"能源设置成功: {kind}={finalVal}, 恢复={er.Recovery}");
+                    StatusText = $"能源设置成功: {kind}={finalVal}";
+                }
+                else
+                {
+                    int? fallbackVal = er.FinalValue ?? er.PreviousValue;
+                    if (fallbackVal.HasValue)
+                    {
+                        if (kind == "charge")
+                            EnergyCharge = fallbackVal.Value;
+                        else if (kind == "night")
+                            EnergyNight = fallbackVal.Value;
+                        else if (kind == "key")
+                            EnergyKey = fallbackVal.Value;
+                    }
+                    AddLog($"能源设置未确认: Code={er.Code}, 恢复={er.Recovery}, 当前值={fallbackVal}");
+                    StatusText = $"能源设置未确认 ({er.Code}), 恢复: {er.Recovery}";
+                    lastErrorTimestamp = DateTime.UtcNow;
+                }
             }
             else
             {
                 AddLog($"能源设置未完全确认: Code={resp.Code}, 回执={resp.EnergyReceipt?.Recovery}");
                 StatusText = $"能源设置结果: {resp.Code}";
+                lastErrorTimestamp = DateTime.UtcNow;
             }
         }
         catch (Exception ex)
         {
             AddLog($"能源设置失败: {ex.Message}");
             StatusText = $"操作失败: {ex.Message}";
+            lastErrorTimestamp = DateTime.UtcNow;
         }
         finally
         {
@@ -565,16 +721,65 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 AddLog($"风扇读取回执: {resp.Code}");
                 StatusText = $"风扇读取结果: {resp.Code}";
+                lastErrorTimestamp = DateTime.UtcNow;
             }
         }
         catch (Exception ex)
         {
             AddLog($"风扇读取失败: {ex.Message}");
             StatusText = $"风扇读取失败: {ex.Message}";
+            lastErrorTimestamp = DateTime.UtcNow;
         }
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    public async Task RestoreFanAutoAsync()
+    {
+        if (activeFanTrialCts != null)
+        {
+            AddLog("正在中止当前风扇试运行并恢复固件自动控制…");
+            StatusText = "正在中止试运行并恢复固件自动控制…";
+            activeFanTrialCts.Cancel();
+            return;
+        }
+
+        if (IsBusy || currentIdentity is null)
+            return;
+        IsBusy = true;
+        StatusText = "正在请求固件恢复风扇自动控制…";
+        AddLog("请求风扇恢复自动模式 (auto)");
+        try
+        {
+            var trial = new FanTrial("auto", 0, 0, 0);
+            var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "fan-trial", currentIdentity, Trial: trial);
+            var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
+            if (resp.Code == "OK" && resp.Receipt is { } fr && fr.Code == "COMPLETED")
+            {
+                FanStateText = "固件自动";
+                AddLog($"已恢复风扇自动控制: 回执={fr.Recovery}");
+                StatusText = "已恢复风扇自动控制";
+            }
+            else
+            {
+                FanStateText = $"恢复提示: {resp.Receipt?.Code ?? resp.Code}";
+                AddLog($"恢复自动未确认: Code={resp.Code}, 回执={resp.Receipt?.Code}/{resp.Receipt?.Recovery}");
+                StatusText = $"恢复自动结果: {resp.Receipt?.Code ?? resp.Code}";
+                lastErrorTimestamp = DateTime.UtcNow;
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"恢复自动异常: {ex.Message}");
+            StatusText = $"恢复自动失败: {ex.Message}";
+            lastErrorTimestamp = DateTime.UtcNow;
+        }
+        finally
+        {
+            IsBusy = false;
+            await RefreshTelemetryAsync();
         }
     }
 
@@ -585,22 +790,53 @@ public sealed class MainViewModel : INotifyPropertyChanged
         IsBusy = true;
         StatusText = $"正在启动限时试运行 ({rpm1}/{rpm2} RPM, {durationSeconds}s)…";
         AddLog($"启动风扇受控试运行: Fan1={rpm1}, Fan2={rpm2}, 持续={durationSeconds}秒");
+        using var cts = new CancellationTokenSource();
+        activeFanTrialCts = cts;
         try
         {
             var trial = new FanTrial("manual", rpm1, rpm2, durationSeconds);
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "fan-trial", currentIdentity, Trial: trial);
-            var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
-            FanStateText = "试运行完成";
-            AddLog($"风扇试运行结束: Code={resp.Code}, 回执={resp.Receipt?.Recovery}");
-            StatusText = $"试运行完成: {resp.Receipt?.Recovery}";
+            var resp = await BrokerClient.ExecuteAsync(req, cts.Token);
+            if (resp.Code == "OK" && resp.Receipt is { } fr)
+            {
+                if (fr.Code == "COMPLETED")
+                {
+                    FanStateText = "试运行完成 (已恢复自动)";
+                    AddLog($"风扇试运行成功完成: 恢复={fr.Recovery}");
+                    StatusText = "试运行完成并恢复自动";
+                }
+                else
+                {
+                    FanStateText = $"试运行未完成: {fr.Code}";
+                    AddLog($"风扇试运行未完全完成: Code={fr.Code}, 恢复={fr.Recovery}");
+                    StatusText = $"试运行未完全完成 ({fr.Code}), 恢复={fr.Recovery}";
+                    lastErrorTimestamp = DateTime.UtcNow;
+                }
+            }
+            else
+            {
+                FanStateText = $"试运行失败: {resp.Code}";
+                AddLog($"风扇试运行通信失败: {resp.Code}");
+                StatusText = $"风扇试运行失败: {resp.Code}";
+                lastErrorTimestamp = DateTime.UtcNow;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            FanStateText = "试运行已取消 (已恢复自动)";
+            AddLog("风扇试运行已由用户取消并恢复自动");
+            StatusText = "风扇试运行已中止";
         }
         catch (Exception ex)
         {
-            AddLog($"风扇试运行失败: {ex.Message}");
+            FanStateText = "试运行异常";
+            AddLog($"风扇试运行异常: {ex.Message}");
             StatusText = $"试运行失败: {ex.Message}";
+            lastErrorTimestamp = DateTime.UtcNow;
         }
         finally
         {
+            activeFanTrialCts = null;
             IsBusy = false;
             await RefreshTelemetryAsync();
         }
