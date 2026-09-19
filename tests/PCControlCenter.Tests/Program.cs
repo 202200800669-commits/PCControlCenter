@@ -423,6 +423,7 @@ await FanWorkerTests.RunAllAsync(Check);
 await ModeWorkerTests.RunAllAsync(Check);
 await EnergyWorkerTests.RunAllAsync(Check);
 DesktopViewModelTests.RunAll(Check);
+FanStatusMapperTests.RunAll(Check);
 foreach (var badInterval in new[] { 0, 31 })
 {
     bool rejected = false;

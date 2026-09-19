@@ -1,12 +1,62 @@
 using PCControlCenter.Desktop.ViewModels;
 using PCControlCenter.Desktop.Services;
 
+sealed class FakeBrightnessService : IBrightnessService
+{
+    public List<int> Invocations { get; } = new();
+    public BrightnessResult NextResult { get; set; } = new(true, "Success", null);
+
+    public Task<BrightnessResult> SetBrightnessAsync(int percent, CancellationToken ct = default)
+    {
+        Invocations.Add(percent);
+        var result = NextResult.Success ? new BrightnessResult(true, "Success", percent) : NextResult;
+        return Task.FromResult(result);
+    }
+
+    public Task<int?> GetBrightnessAsync(CancellationToken ct = default) => Task.FromResult<int?>(null);
+}
+
+sealed class FakeProfileStorage : IProfileStorage
+{
+    public List<ProfileItem>? StoredProfiles
+    {
+        get; set;
+    }
+    public bool ShouldFail
+    {
+        get; set;
+    }
+
+    public FakeProfileStorage(List<ProfileItem>? initial = null)
+    {
+        StoredProfiles = initial != null ? new List<ProfileItem>(initial) : null;
+    }
+
+    public Task<List<ProfileItem>?> LoadProfilesAsync(CancellationToken ct = default)
+    {
+        if (ShouldFail)
+            return Task.FromResult<List<ProfileItem>?>(null);
+        return Task.FromResult(StoredProfiles != null ? new List<ProfileItem>(StoredProfiles) : null);
+    }
+
+    public Task<bool> SaveProfilesAsync(IReadOnlyList<ProfileItem> profiles, CancellationToken ct = default)
+    {
+        if (ShouldFail)
+            return Task.FromResult(false);
+        StoredProfiles = new List<ProfileItem>(profiles);
+        return Task.FromResult(true);
+    }
+}
+
 static class DesktopViewModelTests
 {
     public static void RunAll(Action<bool, string> check)
     {
+        var fakeBrightness = new FakeBrightnessService();
+        var fakeStorage = new FakeProfileStorage();
+
         // 1. Initial State & Collections
-        var vm = new MainViewModel();
+        var vm = new MainViewModel(fakeBrightness, fakeStorage);
         check(vm.Profiles.Count == 3, "default profiles count is 3");
         check(vm.SelectedProfile != null && vm.SelectedProfile.Name == "日常办公", "default selected profile is office");
         check(vm.CpuHistory.Count == 60 && vm.GpuHistory.Count == 60, "cpu and gpu history queues initialized to 60 samples");
@@ -57,7 +107,16 @@ static class DesktopViewModelTests
         // 7. Brightness Clamping
         vm.SetBrightnessAsync(150).GetAwaiter().GetResult();
         check(vm.Brightness == 100, "brightness is clamped to maximum 100");
+        check(fakeBrightness.Invocations[^1] == 100, "fake brightness service recorded clamped 100");
+
         vm.SetBrightnessAsync(-10).GetAwaiter().GetResult();
         check(vm.Brightness == 0, "brightness is clamped to minimum 0");
+        check(fakeBrightness.Invocations[^1] == 0, "fake brightness service recorded clamped 0");
+
+        // 8. Scenario Failure Short-circuit Test
+        fakeBrightness.NextResult = new BrightnessResult(false, "Unsupported", null, "No display");
+        var testProfile = new ProfileItem { Name = "测试场景", Mode = 0, Brightness = 50, FanKind = "auto" };
+        var applySuccess = vm.ApplyProfileAsync(testProfile).GetAwaiter().GetResult();
+        check(!applySuccess, "profile application halts when a step fails");
     }
 }

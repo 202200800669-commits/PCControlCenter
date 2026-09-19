@@ -47,22 +47,12 @@ public sealed class ProfilesView : StackPanel
         {
             if (vm.SelectedProfile is ProfileItem p)
             {
-                vm.AddLog($"正在应用场景配置: {p.Name} (模式={p.Mode}, 亮度={p.Brightness}, 风扇={p.FanKind})");
-                await vm.SetPerformanceModeAsync(p.Mode);
-                await vm.SetBrightnessAsync(p.Brightness);
-                if (p.FanKind == "full")
-                {
-                    await vm.RunFanTrialAsync(5000, 5000, 30);
-                }
-                else if (p.FanKind == "auto")
-                {
-                    await vm.RestoreFanAutoAsync();
-                }
+                await vm.ApplyProfileAsync(p);
             }
         };
 
         var saveBtn = new Button { Content = "保存当前修改", Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 12, 0, 0) };
-        saveBtn.Click += (s, e) =>
+        saveBtn.Click += async (s, e) =>
         {
             string name = profileNameBox.Text.Trim();
             if (string.IsNullOrEmpty(name))
@@ -80,8 +70,15 @@ public sealed class ProfilesView : StackPanel
                 vm.Profiles.Add(newProfile);
                 profileList.SelectedItem = newProfile;
             }
-            vm.SaveProfiles();
-            vm.AddLog($"已保存场景预设: {name}");
+            var ok = await vm.SaveProfilesAsync();
+            if (ok)
+            {
+                vm.StatusText = $"已保存场景预设: {name}";
+            }
+            else
+            {
+                vm.StatusText = $"保存场景预设失败: {name}";
+            }
         };
 
         var editCard = Card(Stack(

@@ -49,7 +49,7 @@ public static class EnergySessionRunner
                 process.StandardInput.Close();
             }
             catch { }
-            if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(5))) != exited)
+            if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(15))) != exited)
             {
                 try
                 {

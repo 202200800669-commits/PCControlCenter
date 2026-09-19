@@ -64,6 +64,13 @@ try {
     }
     $result.PreviousMode=$prev
 
+    if($stop.IsCompleted){
+        $result.Code='CANCELLED_BEFORE_WRITE'
+        $result.FinalMode=$prev
+        $result.Recovery='NOT_NEEDED'
+        throw 'CANCELLED_BEFORE_WRITE'
+    }
+
     if($prev -eq $targetMode){
         $result.FinalMode=$prev
         $result.Code='COMPLETED'
@@ -89,7 +96,7 @@ try {
         }
     }
 } catch {
-    if($result.Code -notin @('BUSY','IDENTITY_MISMATCH','SERVICE_UNAVAILABLE','TARGET_NOT_REACHED','INTERRUPTED','INVALID_PREVIOUS_MODE')){
+    if($result.Code -notin @('BUSY','IDENTITY_MISMATCH','SERVICE_UNAVAILABLE','TARGET_NOT_REACHED','INTERRUPTED','INVALID_PREVIOUS_MODE','CANCELLED_BEFORE_WRITE')){
         $result.Code='CONTROL_FAILED'
     }
 } finally {

@@ -47,7 +47,7 @@ static class EnergyWorkerTests
 
     private sealed record Scenario(string Kind, int TargetValue, int InitialValue = 0, bool WrongModel = false, bool FailCommand = false, bool FailConfirm = false);
 
-    private static async Task<(JsonElement Receipt, JsonElement Writes)> RunAsync(Scenario s, string? fanMutex = null, string? energyMutex = null)
+    private static async Task<(JsonElement Receipt, JsonElement Writes)> RunAsync(Scenario s, string? fanMutex = null, string? energyMutex = null, bool closeStdinBeforeWrite = false)
     {
         using var source = typeof(EnergySessionRunner).Assembly.GetManifestResourceStream("PCControlCenter.Providers.Windows.EnergySession.ps1")!;
         using var reader = new StreamReader(source);
@@ -74,6 +74,7 @@ static class EnergyWorkerTests
         {
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8
@@ -82,6 +83,14 @@ static class EnergyWorkerTests
             start.ArgumentList.Add(arg);
 
         using var process = Process.Start(start) ?? throw new Exception("Test process failed");
+        if (closeStdinBeforeWrite)
+        {
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch { }
+        }
         var errors = process.StandardError.ReadToEndAsync();
         try
         {
@@ -105,6 +114,11 @@ static class EnergyWorkerTests
     {
         if (!OperatingSystem.IsWindows())
             return;
+
+        var cancelledBeforeWrite = await RunAsync(new("charge", 1, 0), closeStdinBeforeWrite: true);
+        check(cancelledBeforeWrite.Receipt.GetProperty("Code").GetString() == "CANCELLED_BEFORE_WRITE" &&
+              cancelledBeforeWrite.Receipt.GetProperty("Recovery").GetString() == "NOT_NEEDED" &&
+              cancelledBeforeWrite.Writes.GetArrayLength() == 0, "pre-write cancellation in energy worker aborts with zero writes");
 
         var charge = await RunAsync(new("charge", 1, 0));
         check(charge.Receipt.GetProperty("Code").GetString() == "COMPLETED" &&

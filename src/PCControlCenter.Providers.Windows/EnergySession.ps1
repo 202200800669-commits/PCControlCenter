@@ -117,6 +117,13 @@ try {
     }
     $result.PreviousValue = $prev
 
+    if ($stop.IsCompleted) {
+        $result.Code = 'CANCELLED_BEFORE_WRITE'
+        $result.FinalValue = $prev
+        $result.Recovery = 'NOT_NEEDED'
+        throw 'CANCELLED_BEFORE_WRITE'
+    }
+
     if ($prev -eq $value) {
         $result.FinalValue = $prev
         $result.Code = 'COMPLETED'
@@ -142,7 +149,7 @@ try {
         }
     }
 } catch {
-    if ($result.Code -notin @('BUSY', 'IDENTITY_MISMATCH', 'TARGET_NOT_REACHED', 'INTERRUPTED', 'INVALID_PREVIOUS_VALUE')) {
+    if ($result.Code -notin @('BUSY', 'IDENTITY_MISMATCH', 'TARGET_NOT_REACHED', 'INTERRUPTED', 'INVALID_PREVIOUS_VALUE', 'CANCELLED_BEFORE_WRITE')) {
         $result.Code = 'CONTROL_FAILED'
     }
 } finally {

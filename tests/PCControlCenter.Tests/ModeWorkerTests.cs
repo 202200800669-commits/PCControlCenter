@@ -43,7 +43,7 @@ static class ModeWorkerTests
 
     private sealed record Scenario(int TargetMode, int InitialMode = 0, bool WrongModel = false, bool ServiceDown = false, bool FailCommand = false, bool FailConfirm = false);
 
-    private static async Task<(JsonElement Receipt, JsonElement Commands)> RunAsync(Scenario s, string? fanMutex = null, string? modeMutex = null)
+    private static async Task<(JsonElement Receipt, JsonElement Commands)> RunAsync(Scenario s, string? fanMutex = null, string? modeMutex = null, bool closeStdinBeforeWrite = false)
     {
         using var source = typeof(ModeSessionRunner).Assembly.GetManifestResourceStream("PCControlCenter.Providers.Windows.ModeSession.ps1")!;
         using var reader = new StreamReader(source);
@@ -63,6 +63,7 @@ static class ModeWorkerTests
         {
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8
@@ -71,6 +72,14 @@ static class ModeWorkerTests
             start.ArgumentList.Add(arg);
 
         using var process = Process.Start(start) ?? throw new Exception("Test process failed");
+        if (closeStdinBeforeWrite)
+        {
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch { }
+        }
         var errors = process.StandardError.ReadToEndAsync();
         try
         {
@@ -94,6 +103,11 @@ static class ModeWorkerTests
     {
         if (!OperatingSystem.IsWindows())
             return;
+
+        var cancelledBeforeWrite = await RunAsync(new(TargetMode: 1, InitialMode: 0), closeStdinBeforeWrite: true);
+        check(cancelledBeforeWrite.Receipt.GetProperty("Code").GetString() == "CANCELLED_BEFORE_WRITE" &&
+              cancelledBeforeWrite.Receipt.GetProperty("Recovery").GetString() == "NOT_NEEDED" &&
+              cancelledBeforeWrite.Commands.GetArrayLength() == 0, "pre-write cancellation aborts with zero commands");
 
         var normal = await RunAsync(new(TargetMode: 1, InitialMode: 0));
         check(normal.Receipt.GetProperty("Code").GetString() == "COMPLETED" &&
