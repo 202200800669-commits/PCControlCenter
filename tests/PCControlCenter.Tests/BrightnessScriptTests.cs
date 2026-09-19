@@ -63,6 +63,38 @@ static class BrightnessScriptTests
             mockInvoke: "[PSCustomObject]@{ ReturnValue = 0 }",
             mockBrightness: "@([PSCustomObject]@{ Active = $true; InstanceName = 'OTHER_PANEL'; CurrentBrightness = 15 }, [PSCustomObject]@{ Active = $true; InstanceName = 'TARGET_PANEL'; CurrentBrightness = 85 })");
         check(multiResult.Status == "Success" && multiResult.Confirmed == 85, "mock CIM multi-instance strictly matches active InstanceName");
+
+        // 7. Mock CIM 测试 - 目标实例缺失时绝不借用其他显示器的值 (报告反例: 目标TARGET, 读回列表仅OTHER=12)
+        var missingTargetResult = await RunMockScriptAsync(
+            targetPercent: 85,
+            mockMethods: "@([PSCustomObject]@{ Active = $true; InstanceName = 'TARGET_PANEL' })",
+            mockInvoke: "[PSCustomObject]@{ ReturnValue = 0 }",
+            mockBrightness: "@([PSCustomObject]@{ Active = $true; InstanceName = 'OTHER_PANEL'; CurrentBrightness = 12 })");
+        check(missingTargetResult.Status == "SuccessUnconfirmed" && missingTargetResult.Confirmed == null, "mock CIM missing target panel returns SuccessUnconfirmed and never borrows other panel value");
+
+        // 8. Mock CIM 测试 - 目标实例存在但非活动状态时不读回
+        var inactiveTargetResult = await RunMockScriptAsync(
+            targetPercent: 85,
+            mockMethods: "@([PSCustomObject]@{ Active = $true; InstanceName = 'TARGET_PANEL' })",
+            mockInvoke: "[PSCustomObject]@{ ReturnValue = 0 }",
+            mockBrightness: "@([PSCustomObject]@{ Active = $false; InstanceName = 'TARGET_PANEL'; CurrentBrightness = 85 })");
+        check(inactiveTargetResult.Status == "SuccessUnconfirmed" && inactiveTargetResult.Confirmed == null, "mock CIM inactive target panel returns SuccessUnconfirmed");
+
+        // 9. Mock CIM 测试 - 目标标识缺失且存在多块活动屏幕时不借用 (消除歧义)
+        var ambiguousResult = await RunMockScriptAsync(
+            targetPercent: 50,
+            mockMethods: "@([PSCustomObject]@{ Active = $true; InstanceName = '' })",
+            mockInvoke: "[PSCustomObject]@{ ReturnValue = 0 }",
+            mockBrightness: "@([PSCustomObject]@{ Active = $true; InstanceName = 'PANEL_A'; CurrentBrightness = 30 }, [PSCustomObject]@{ Active = $true; InstanceName = 'PANEL_B'; CurrentBrightness = 60 })");
+        check(ambiguousResult.Status == "SuccessUnconfirmed" && ambiguousResult.Confirmed == null, "mock CIM missing target identifier with multiple active panels returns SuccessUnconfirmed");
+
+        // 10. Mock CIM 测试 - 目标标识缺失但仅有单块活动屏幕时安全读回
+        var singlePanelResult = await RunMockScriptAsync(
+            targetPercent: 50,
+            mockMethods: "@([PSCustomObject]@{ Active = $true; InstanceName = '' })",
+            mockInvoke: "[PSCustomObject]@{ ReturnValue = 0 }",
+            mockBrightness: "@([PSCustomObject]@{ Active = $true; InstanceName = 'SINGLE_PANEL'; CurrentBrightness = 50 })");
+        check(singlePanelResult.Status == "Success" && singlePanelResult.Confirmed == 50, "mock CIM missing target identifier with single active panel returns Success");
     }
 
     private static async Task<bool> TestSyntaxInPs51Async(string scriptContent)

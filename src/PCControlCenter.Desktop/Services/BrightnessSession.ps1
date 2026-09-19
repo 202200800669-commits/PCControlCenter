@@ -23,12 +23,16 @@ try {
     $cur = $null
     try {
         $brightnessList = @(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue)
-        $matched = @($brightnessList | Where-Object { $_.Active -and ($null -eq $inst -or $_.InstanceName -eq $inst) })
-        if ($matched.Count -eq 0) {
-            $matched = @($brightnessList | Where-Object { $_.Active })
-        }
-        if ($matched.Count -gt 0 -and $null -ne $matched[0].CurrentBrightness) {
-            $cur = [int]$matched[0].CurrentBrightness
+        if ($null -ne $inst -and $inst -ne '') {
+            $matched = @($brightnessList | Where-Object { $_.Active -and $_.InstanceName -eq $inst })
+            if ($matched.Count -gt 0 -and $null -ne $matched[0].CurrentBrightness) {
+                $cur = [int]$matched[0].CurrentBrightness
+            }
+        } else {
+            $activeList = @($brightnessList | Where-Object { $_.Active })
+            if ($activeList.Count -eq 1 -and $null -ne $activeList[0].CurrentBrightness) {
+                $cur = [int]$activeList[0].CurrentBrightness
+            }
         }
     } catch { }
 

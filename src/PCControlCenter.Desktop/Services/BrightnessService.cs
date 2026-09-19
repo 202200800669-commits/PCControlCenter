@@ -214,7 +214,7 @@ public class WindowsBrightnessService : IBrightnessService
             }
             else if (status == "SuccessUnconfirmed")
             {
-                return new(true, "SuccessUnconfirmed", null);
+                return new(false, "SuccessUnconfirmed", null, "Brightness command executed but readback confirmation is unavailable");
             }
             else if (status == "Unsupported")
             {

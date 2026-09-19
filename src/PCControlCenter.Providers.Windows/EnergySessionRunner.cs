@@ -8,10 +8,16 @@ namespace PCControlCenter.Providers.Windows;
 
 public static class EnergySessionRunner
 {
+    public static TimeSpan TargetPhaseTimeout { get; set; } = TimeSpan.FromSeconds(20);
+    public static TimeSpan RecoveryWaitTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
     public static async Task<EnergyReceipt> RunAsync(EnergyRequest request, CancellationToken stop)
     {
         if (!OperatingSystem.IsWindows() || !request.IsValid)
             return new("INVALID_REQUEST", request.Kind, request.Value, Recovery: "NOT_NEEDED");
+
+        if (RecoveryProcessTracker.HasInFlightRecovery)
+            return new("BUSY", request.Kind, request.Value, Recovery: "UNCONFIRMED");
 
         using var resource = typeof(EnergySessionRunner).Assembly.GetManifestResourceStream("PCControlCenter.Providers.Windows.EnergySession.ps1")
             ?? throw new IOException("RESOURCE_MISSING");
@@ -42,8 +48,8 @@ public static class EnergySessionRunner
         var errors = process.StandardError.ReadToEndAsync();
         var exited = process.WaitForExitAsync();
 
-        // 阶段 1：目标操作阶段（由 stop 令牌与 20 秒目标时限控制）
-        if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(20), stop)) != exited)
+        // 阶段 1：目标操作阶段（由 stop 令牌与 TargetPhaseTimeout 控制）
+        if (await Task.WhenAny(exited, Task.Delay(TargetPhaseTimeout, stop)) != exited)
         {
             try
             {
@@ -51,14 +57,12 @@ public static class EnergySessionRunner
             }
             catch { }
 
-            // 阶段 2：恢复执行阶段（不使用已取消的 stop 令牌，给予子进程充分的恢复完成硬时限）
-            if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(60))) != exited)
+            // 阶段 2：恢复执行阶段（脱离已取消的 stop 令牌，给予子进程充分等待时限）
+            if (await Task.WhenAny(exited, Task.Delay(RecoveryWaitTimeout)) != exited)
             {
-                try
-                {
-                    process.Kill(true);
-                }
-                catch { }
+                // 超时但底层工作者仍在执行恢复，严禁强制杀死以防截断回滚与提前释放互斥锁约束。
+                // 纳入后台恢复跟踪，保留未确认状态与硬件互斥锁定。
+                RecoveryProcessTracker.Track(process, @"Global\PCControlCenter.ThinkBookEnergySession", @"Global\PCControlCenter.ThinkBookFanSession");
                 return new("WORKER_TIMEOUT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
             }
         }

@@ -167,6 +167,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Notify();
         }
     }
+    private int? confirmedBrightness;
+    public int? ConfirmedBrightness
+    {
+        get => confirmedBrightness;
+        private set
+        {
+            confirmedBrightness = value;
+            Notify();
+        }
+    }
     public int PerformanceMode
     {
         get => performanceMode; set
@@ -451,6 +461,26 @@ public sealed class MainViewModel : INotifyPropertyChanged
         await LoadProfilesAsync(ct);
         try
         {
+            var initBright = await brightnessService.GetBrightnessAsync(ct);
+            if (initBright.HasValue)
+            {
+                Brightness = initBright.Value;
+                ConfirmedBrightness = initBright.Value;
+                AddLog($"已读取当前屏幕亮度: {initBright.Value}%");
+            }
+            else
+            {
+                ConfirmedBrightness = null;
+                AddLog("未读取到初始屏幕亮度 (硬件接口不可用或未返回)");
+            }
+        }
+        catch (Exception ex)
+        {
+            ConfirmedBrightness = null;
+            AddLog($"读取初始屏幕亮度异常: {ex.Message}");
+        }
+        try
+        {
             currentIdentity = await WindowsProbe.IdentifyAsync(probe, ct);
             DeviceTitle = $"{currentIdentity.Model}";
             AddLog($"已识别设备: {currentIdentity.Manufacturer} {currentIdentity.Product} ({currentIdentity.Bios})");
@@ -495,11 +525,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         try
         {
             var res = await brightnessService.SetBrightnessAsync(percent);
-            if (res.Success)
+            if (res.Status == "Success" && res.ConfirmedValue.HasValue)
             {
-                Brightness = res.ConfirmedValue ?? percent;
+                ConfirmedBrightness = res.ConfirmedValue.Value;
+                Brightness = res.ConfirmedValue.Value;
                 StatusText = $"屏幕亮度已调整为 {Brightness}%";
                 AddLog($"屏幕亮度已确认: {Brightness}%");
+            }
+            else if (res.Status == "SuccessUnconfirmed")
+            {
+                StatusText = $"屏幕亮度指令已发送至 {percent}% (未读回确认)";
+                AddLog($"屏幕亮度指令已发送: {percent}% (未独立读回确认)");
             }
             else
             {
@@ -698,10 +734,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         // 步骤 2：屏幕亮度
         var brightRes = await SetBrightnessAsync(p.Brightness);
-        if (!brightRes.Success)
+        if (!brightRes.Success || brightRes.Status != "Success" || !brightRes.ConfirmedValue.HasValue)
         {
-            AddLog($"场景应用中止: 亮度设置至 {p.Brightness}% 失败 ({brightRes.Status})，停止执行风扇调节");
-            StatusText = "场景应用中止: 亮度设置未成功";
+            AddLog($"场景应用中止: 亮度设置至 {p.Brightness}% 失败或未能确认 ({brightRes.Status})，停止执行风扇调节");
+            StatusText = $"场景应用中止: 屏幕亮度未确认 ({brightRes.Status})";
             return false;
         }
 
@@ -898,10 +934,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         bool cancelled = false;
         BrokerResponse? resp = null;
         FanOperationResult result;
+        var requestId = Guid.NewGuid().ToString("N");
         try
         {
             var trial = new FanTrial(mode, rpm1, rpm2, durationSeconds);
-            var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "fan-trial", currentIdentity, Trial: trial);
+            var req = new BrokerRequest(BrokerProtocol.Version, requestId, "fan-trial", currentIdentity, Trial: trial);
             resp = await brokerExecutor.ExecuteAsync(req, cts.Token);
         }
         catch (OperationCanceledException)
@@ -923,24 +960,49 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 FanStateText = "取消中 (恢复中)";
                 StatusText = "风扇试运行已取消，正在等待底层恢复完成…";
-                AddLog("已触发试运行取消，正在等待硬件控制锁释放…");
+                AddLog("已触发试运行取消，正在等待硬件控制锁释放与终态…");
 
-                using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                var released = await brokerExecutor.WaitForRecoveryCompleteAsync(waitCts.Token);
-                if (released)
+                SessionStatus recoveryStatus;
+                try
+                {
+                    using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    recoveryStatus = await brokerExecutor.WaitForRecoveryAsync(requestId, waitCts.Token);
+                }
+                catch (Exception ex)
+                {
+                    recoveryStatus = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", ex.Message);
+                }
+
+                if (recoveryStatus.State == SessionState.NotStarted)
+                {
+                    FanStateText = "已取消 (未启动)";
+                    StatusText = "风扇试运行在启动前已取消，未执行硬件写入";
+                    AddLog("操作在底层锁创建前取消，零写入");
+                    result = new FanOperationResult(false, "Cancelled", "NOT_NEEDED", "未启动");
+                }
+                else if (recoveryStatus.State == SessionState.RecoveryCompleted)
                 {
                     FanStateText = "已取消 (未确认)";
                     StatusText = "风扇试运行已取消，底层控制已释放 (未独立确认自动)";
-                    AddLog("底层硬件锁已释放，解除控制锁定");
+                    AddLog($"底层控制锁已释放 (Recovery={recoveryStatus.Recovery})");
+                    result = new FanOperationResult(false, "Cancelled", recoveryStatus.Recovery ?? "UNCONFIRMED");
+                }
+                else if (recoveryStatus.State == SessionState.TerminatedUnconfirmed)
+                {
+                    FanStateText = "恢复未确认";
+                    StatusText = $"风扇试运行异常终止: {recoveryStatus.Message}";
+                    AddLog($"底层工作进程异常终止: {recoveryStatus.Message}，状态未确认");
+                    lastErrorTimestamp = DateTime.UtcNow;
+                    result = new FanOperationResult(false, "Failed", "UNCONFIRMED", recoveryStatus.Message);
                 }
                 else
                 {
                     FanStateText = "恢复未确认";
-                    StatusText = "风扇试运行已取消，但未能确认恢复完成";
-                    AddLog("恢复超时或未能确认底层控制锁释放");
+                    StatusText = "风扇试运行已取消，未能确认底层恢复完成";
+                    AddLog($"恢复超时或未能确认终态 ({recoveryStatus.Message})");
                     lastErrorTimestamp = DateTime.UtcNow;
+                    result = new FanOperationResult(false, "Cancelled", "UNCONFIRMED", recoveryStatus.Message);
                 }
-                result = new FanOperationResult(false, "Cancelled", "UNCONFIRMED");
             }
             else if (resp != null)
             {

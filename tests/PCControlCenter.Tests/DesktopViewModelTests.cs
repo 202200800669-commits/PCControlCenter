@@ -12,6 +12,7 @@ sealed class FakeBrightnessService : IBrightnessService
 {
     public List<int> Invocations { get; } = new();
     public BrightnessResult NextResult { get; set; } = new(true, "Success", null);
+    public int? CurrentHardwareBrightness { get; set; } = null;
 
     public Task<BrightnessResult> SetBrightnessAsync(int percent, CancellationToken ct = default)
     {
@@ -20,7 +21,7 @@ sealed class FakeBrightnessService : IBrightnessService
         return Task.FromResult(result);
     }
 
-    public Task<int?> GetBrightnessAsync(CancellationToken ct = default) => Task.FromResult<int?>(null);
+    public Task<int?> GetBrightnessAsync(CancellationToken ct = default) => Task.FromResult(CurrentHardwareBrightness);
 }
 
 sealed class FakeProfileStorage : IProfileStorage
@@ -61,6 +62,10 @@ sealed class FakeBrokerExecutor : IBrokerExecutor
     {
         get; set;
     }
+    public Func<string, CancellationToken, Task<SessionStatus>>? RecoveryStatusWaiter
+    {
+        get; set;
+    }
     public Func<CancellationToken, Task<bool>>? RecoveryWaiter
     {
         get; set;
@@ -84,6 +89,24 @@ sealed class FakeBrokerExecutor : IBrokerExecutor
             return Task.FromResult(new BrokerResponse(BrokerProtocol.Version, request.RequestId, "OK", Receipt: receipt));
         }
         return Task.FromResult(new BrokerResponse(BrokerProtocol.Version, request.RequestId, "OK"));
+    }
+
+    public Task<SessionStatus> WaitForRecoveryAsync(string requestId, CancellationToken ct = default)
+    {
+        if (RecoveryStatusWaiter != null)
+            return RecoveryStatusWaiter(requestId, ct);
+        if (RecoveryWaiter != null)
+        {
+            return RecoveryWaiter(ct).ContinueWith(t =>
+            {
+                if (t.IsCanceled || t.IsFaulted)
+                    return new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", t.Exception?.Message ?? "Cancelled");
+                return t.Result
+                    ? new SessionStatus(requestId, SessionState.RecoveryCompleted, "UNCONFIRMED")
+                    : new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED");
+            }, TaskScheduler.Default);
+        }
+        return Task.FromResult(new SessionStatus(requestId, SessionState.RecoveryCompleted, "UNCONFIRMED"));
     }
 
     public Task<bool> WaitForRecoveryCompleteAsync(CancellationToken ct = default)
@@ -276,6 +299,144 @@ static class DesktopViewModelTests
 
         // 10. Real Coalescing Queue Tests in WindowsBrightnessService
         await RunBrightnessQueueTestsAsync(check);
+
+        // 11. Review Regression: Unconfirmed Brightness Consumption Chain & Initialization
+        await RunUnconfirmedBrightnessTestsAsync(check);
+
+        // 12. Review Regression: Recovery Wait Cancellation Non-Escapes & State Mappings
+        await RunRecoveryExceptionAndStatesTestsAsync(check);
+
+        // 13. Review Regression: In-flight Recovery Process Tracking & Write Constraints
+        await RunRecoveryProcessTrackerTestsAsync(check);
+    }
+
+    private static async Task RunUnconfirmedBrightnessTestsAsync(Action<bool, string> check)
+    {
+        var fakeBrightness = new FakeBrightnessService();
+        var fakeStorage = new FakeProfileStorage();
+        var fakeBroker = new FakeBrokerExecutor();
+        var vm = new MainViewModel(fakeBrightness, fakeStorage, fakeBroker);
+        vm.SetIdentityForTesting(new DeviceIdentity("LENOVO", "21R0", "ThinkBook 16p G6 IAX", "R2CN57WW", "Windows"));
+
+        // 1. SuccessUnconfirmed 亮度设置：不污染 ConfirmedBrightness，不声称已确认
+        fakeBrightness.NextResult = new BrightnessResult(false, "SuccessUnconfirmed", null);
+        var setRes = await vm.SetBrightnessAsync(73);
+        check(!setRes.Success, "SuccessUnconfirmed brightness returns Success=false");
+        check(vm.ConfirmedBrightness == null, "ConfirmedBrightness remains null when readback is unavailable");
+        check(!vm.LogText.Contains("已确认: 73%"), "log does not claim brightness confirmed 73%");
+        check(vm.StatusText.Contains("未读回确认"), "status text explicitly reports unconfirmed readback");
+
+        // 2. 场景应用中的亮度未确认步骤阻断后续风扇调节
+        bool fanInvoked = false;
+        fakeBroker.Handler = (req, ct) =>
+        {
+            if (req.Operation == "fan-trial")
+                fanInvoked = true;
+            return Task.FromResult(new BrokerResponse(BrokerProtocol.Version, req.RequestId, "OK"));
+        };
+        var unconfProfile = new ProfileItem { Name = "亮度未确认场景", Mode = 0, Brightness = 73, FanKind = "auto" };
+        var profileOk = await vm.ApplyProfileAsync(unconfProfile);
+        check(!profileOk, "profile application halts when brightness is SuccessUnconfirmed");
+        check(!fanInvoked, "fan step never invoked when brightness confirmation fails");
+        check(!vm.LogText.Contains("场景配置应用完成: 亮度未确认场景"), "profile never claims completed when brightness unconfirmed");
+
+        // 3. InitializeAsync 的有读回与无读回两种状态
+        fakeBrightness.CurrentHardwareBrightness = 65;
+        await vm.InitializeAsync();
+        check(vm.Brightness == 65 && vm.ConfirmedBrightness == 65, "initialize with hardware brightness populates confirmed brightness 65");
+
+        fakeBrightness.CurrentHardwareBrightness = null;
+        await vm.InitializeAsync();
+        check(vm.ConfirmedBrightness == null, "initialize without hardware brightness sets confirmed brightness to null");
+        check(vm.LogText.Contains("未读取到初始屏幕亮度"), "log records that initial brightness could not be read");
+    }
+
+    private static async Task RunRecoveryExceptionAndStatesTestsAsync(Action<bool, string> check)
+    {
+        var fakeBrightness = new FakeBrightnessService();
+        var fakeStorage = new FakeProfileStorage();
+        var fakeBroker = new FakeBrokerExecutor();
+        var vm = new MainViewModel(fakeBrightness, fakeStorage, fakeBroker);
+        vm.SetIdentityForTesting(new DeviceIdentity("LENOVO", "21R0", "ThinkBook 16p G6 IAX", "R2CN57WW", "Windows"));
+
+        // 1. 模拟真实 Task.Delay 取消令牌触发 OperationCanceledException 逃逸路径
+        fakeBroker.Handler = (req, ct) => throw new OperationCanceledException();
+        fakeBroker.RecoveryWaiter = ct => Task.FromCanceled<bool>(new CancellationToken(true));
+
+        bool escaped = false;
+        try
+        {
+            await vm.RunFanTrialAsync(3500, 3500, 10);
+        }
+        catch (OperationCanceledException)
+        {
+            escaped = true;
+        }
+        check(!escaped, "cancellation exception during recovery wait does not escape to UI caller");
+        check(!vm.IsBusy, "vm leaves busy state after recovery wait cancellation");
+        check(vm.FanStateText == "恢复未确认", "fan state reports 恢复未确认 instead of leaving 取消中 (恢复中)");
+
+        // 2. 状态映射场景 1: 取消发生在工作者创建锁之前 (SessionState.NotStarted, 零写入)
+        fakeBroker.RecoveryStatusWaiter = (reqId, ct) =>
+            Task.FromResult(new SessionStatus(reqId, SessionState.NotStarted, "NOT_NEEDED"));
+        var notStartedRes = await vm.RunFanTrialAsync(3500, 3500, 10);
+        check(!notStartedRes.Success, "not started cancellation returns Success=false");
+        check(notStartedRes.Recovery == "NOT_NEEDED", "not started cancellation reports Recovery=NOT_NEEDED");
+        check(vm.FanStateText == "已取消 (未启动)", "fan state reports 已取消 (未启动) for pre-lock cancellation");
+
+        // 3. 状态映射场景 2: 正常恢复结束 (SessionState.RecoveryCompleted)
+        fakeBroker.RecoveryStatusWaiter = (reqId, ct) =>
+            Task.FromResult(new SessionStatus(reqId, SessionState.RecoveryCompleted, "RESTORED_AUTO"));
+        var completedRes = await vm.RunFanTrialAsync(3500, 3500, 10);
+        check(vm.FanStateText == "已取消 (未确认)", "completed recovery maps to 已取消 (未确认)");
+        check(completedRes.Recovery == "RESTORED_AUTO", "recovery receipt restored auto");
+
+        // 4. 状态映射场景 3: 工作者异常退出 / 遗弃互斥锁 (SessionState.TerminatedUnconfirmed)
+        fakeBroker.RecoveryStatusWaiter = (reqId, ct) =>
+            Task.FromResult(new SessionStatus(reqId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", "AbandonedMutexException"));
+        var terminatedRes = await vm.RunFanTrialAsync(3500, 3500, 10);
+        check(!terminatedRes.Success, "terminated worker returns Success=false");
+        check(vm.FanStateText == "恢复未确认", "terminated worker maps to 恢复未确认");
+
+        // 5. 状态映射场景 4: 恢复等待超时 (SessionState.TimedOutUnconfirmed)
+        fakeBroker.RecoveryStatusWaiter = (reqId, ct) =>
+            Task.FromResult(new SessionStatus(reqId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "Timeout"));
+        var timeoutRes = await vm.RunFanTrialAsync(3500, 3500, 10);
+        check(!timeoutRes.Success, "timed out recovery returns Success=false");
+        check(vm.FanStateText == "恢复未确认", "timed out recovery maps to 恢复未确认");
+    }
+
+    private static async Task RunRecoveryProcessTrackerTestsAsync(Action<bool, string> check)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        PCControlCenter.Providers.Windows.RecoveryProcessTracker.ClearForTesting();
+        check(!PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "initially no in-flight recovery processes");
+
+        // 启动一个短期运行的进程模拟后台守护恢复进程
+        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 3 > nul")
+        {
+            CreateNoWindow = true,
+            UseShellExecute = false
+        };
+        var proc = System.Diagnostics.Process.Start(psi);
+        if (proc != null)
+        {
+            PCControlCenter.Providers.Windows.RecoveryProcessTracker.Track(proc, "Global\\PCControlCenter.ThinkBookModeSession");
+            check(PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "in-flight recovery is active while process runs");
+
+            // 模式切换与能源运行器应被约束，返回 BUSY
+            var modeReceipt = await PCControlCenter.Providers.Windows.ModeSessionRunner.RunAsync(new ModeRequest(1), CancellationToken.None);
+            check(modeReceipt.Code == "BUSY", "mode session runner rejects writes with BUSY while in-flight recovery is active");
+
+            var energyReceipt = await PCControlCenter.Providers.Windows.EnergySessionRunner.RunAsync(new EnergyRequest("charge", 1), CancellationToken.None);
+            check(energyReceipt.Code == "BUSY", "energy session runner rejects writes with BUSY while in-flight recovery is active");
+
+            // 清理测试进程
+            PCControlCenter.Providers.Windows.RecoveryProcessTracker.ClearForTesting();
+            check(!PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "recovery tracker cleared after testing");
+        }
     }
 
     private static async Task RunBrightnessQueueTestsAsync(Action<bool, string> check)
