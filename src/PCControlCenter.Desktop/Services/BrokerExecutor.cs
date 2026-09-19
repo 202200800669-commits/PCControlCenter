@@ -99,7 +99,14 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
         {
             var resp = await BrokerClient.ExecuteAsync(request, ct);
             var recovery = resp.Receipt?.Recovery ?? resp.ModeReceipt?.Recovery ?? resp.EnergyReceipt?.Recovery;
-            BrokerSessionTracker.RecordState(request.RequestId, SessionState.RecoveryCompleted, recovery, resp.Code);
+            if (resp.Code == "OK" && recovery != "UNCONFIRMED")
+            {
+                BrokerSessionTracker.RecordState(request.RequestId, SessionState.RecoveryCompleted, recovery, resp.Code);
+            }
+            else
+            {
+                BrokerSessionTracker.RecordState(request.RequestId, SessionState.TerminatedUnconfirmed, recovery ?? "UNCONFIRMED", resp.Code);
+            }
             return resp;
         }
         catch (OperationCanceledException)
@@ -123,10 +130,29 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
                 if (ct.IsCancellationRequested)
                     break;
 
+                // 1. 优先读取底层工作者写入的跨进程真实最终回执
+                var receipt = SessionReceiptStore.GetReceipt(requestId);
+                if (receipt != null)
+                {
+                    if (receipt.State == "Completed" && receipt.Recovery != "UNCONFIRMED")
+                    {
+                        var done = new SessionStatus(requestId, SessionState.RecoveryCompleted, receipt.Recovery, receipt.Code);
+                        BrokerSessionTracker.Update(done);
+                        return done;
+                    }
+                    if (receipt.State == "TerminatedUnconfirmed" || receipt.Recovery == "UNCONFIRMED")
+                    {
+                        var unconf = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", receipt.Message ?? receipt.Code);
+                        BrokerSessionTracker.Update(unconf);
+                        return unconf;
+                    }
+                }
+
                 var current = BrokerSessionTracker.GetStatus(requestId);
                 if (current.State is SessionState.RecoveryCompleted or SessionState.TerminatedUnconfirmed)
                     return current;
 
+                // 2. 检查硬件互斥锁与遗弃状态
                 try
                 {
                     using var m = Mutex.OpenExisting(@"Global\PCControlCenter.ThinkBookFanSession");
@@ -137,8 +163,7 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
                     }
                     catch (AbandonedMutexException)
                     {
-                        // 异常退出：工作进程异常崩溃或被杀死，互斥锁遗弃。
-                        // 必须释放取得的所有权并标记为异常未确认！
+                        // 异常退出：工作进程崩溃或被终止导致互斥锁遗弃
                         try
                         {
                             m.ReleaseMutex();
@@ -156,14 +181,27 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
                             m.ReleaseMutex();
                         }
                         catch { }
-                        var s = BrokerSessionTracker.GetStatus(requestId);
-                        if (s.State == SessionState.NotStarted)
+
+                        // 锁释放后再次检查是否有迟到的回执
+                        receipt = SessionReceiptStore.GetReceipt(requestId);
+                        if (receipt != null)
+                        {
+                            var state = (receipt.Recovery == "UNCONFIRMED") ? SessionState.TerminatedUnconfirmed : SessionState.RecoveryCompleted;
+                            var s = new SessionStatus(requestId, state, receipt.Recovery, receipt.Code);
+                            BrokerSessionTracker.Update(s);
+                            return s;
+                        }
+
+                        var currentTracked = BrokerSessionTracker.GetStatus(requestId);
+                        if (currentTracked.State == SessionState.NotStarted)
                         {
                             return new SessionStatus(requestId, SessionState.NotStarted, "NOT_NEEDED", "操作在创建底层锁前已取消");
                         }
-                        var done = new SessionStatus(requestId, SessionState.RecoveryCompleted, s.Recovery ?? "NOT_NEEDED", "底层控制锁已释放");
-                        BrokerSessionTracker.Update(done);
-                        return done;
+
+                        // 锁已释放但未读取到底层回执：绝不捏造 NOT_NEEDED 或成功，明确返回未确认
+                        var noReceiptStatus = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "控制锁已释放但未读取到底层恢复回执");
+                        BrokerSessionTracker.Update(noReceiptStatus);
+                        return noReceiptStatus;
                     }
                     else
                     {
@@ -172,14 +210,23 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
                 }
                 catch (WaitHandleCannotBeOpenedException)
                 {
-                    var s = BrokerSessionTracker.GetStatus(requestId);
-                    if (s.State == SessionState.NotStarted)
+                    receipt = SessionReceiptStore.GetReceipt(requestId);
+                    if (receipt != null)
+                    {
+                        var state = (receipt.Recovery == "UNCONFIRMED") ? SessionState.TerminatedUnconfirmed : SessionState.RecoveryCompleted;
+                        var s = new SessionStatus(requestId, state, receipt.Recovery, receipt.Code);
+                        BrokerSessionTracker.Update(s);
+                        return s;
+                    }
+
+                    var sTracked = BrokerSessionTracker.GetStatus(requestId);
+                    if (sTracked.State == SessionState.NotStarted)
                     {
                         return new SessionStatus(requestId, SessionState.NotStarted, "NOT_NEEDED", "操作在创建底层锁前已取消");
                     }
-                    if (s.State is SessionState.Running or SessionState.Recovering)
+                    if (sTracked.State is SessionState.Running or SessionState.Recovering)
                     {
-                        var unconf = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", "底层工作进程退出但未取得恢复回执");
+                        var unconf = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", "底层锁缺失且未取得工作者回执");
                         BrokerSessionTracker.Update(unconf);
                         return unconf;
                     }
@@ -191,21 +238,18 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
                     return err;
                 }
 
-                try
-                {
-                    await Task.Delay(200, ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
+                await Task.Delay(200, ct);
             }
         }
-        catch
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
         {
+            var err = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", ex.Message);
+            BrokerSessionTracker.Update(err);
+            return err;
         }
 
-        var timeoutStatus = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "等待底层恢复超时");
+        var timeoutStatus = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "恢复等待超时");
         BrokerSessionTracker.Update(timeoutStatus);
         return timeoutStatus;
     }

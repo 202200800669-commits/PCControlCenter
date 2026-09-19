@@ -1,7 +1,11 @@
+using System;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using PCControlCenter.Core;
 
 namespace PCControlCenter.Providers.Windows;
@@ -10,8 +14,12 @@ public static class EnergySessionRunner
 {
     public static TimeSpan TargetPhaseTimeout { get; set; } = TimeSpan.FromSeconds(20);
     public static TimeSpan RecoveryWaitTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public static Func<ProcessStartInfo, Process?>? ProcessLauncher
+    {
+        get; set;
+    }
 
-    public static async Task<EnergyReceipt> RunAsync(EnergyRequest request, CancellationToken stop)
+    public static async Task<EnergyReceipt> RunAsync(EnergyRequest request, CancellationToken stop, string requestId = "")
     {
         if (!OperatingSystem.IsWindows() || !request.IsValid)
             return new("INVALID_REQUEST", request.Kind, request.Value, Recovery: "NOT_NEEDED");
@@ -38,47 +46,72 @@ public static class EnergySessionRunner
         foreach (var arg in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(prefix + script)) })
             start.ArgumentList.Add(arg);
 
-        using var process = new Process { StartInfo = start };
-        stop.ThrowIfCancellationRequested();
-        if (!process.Start())
+        var process = ProcessLauncher != null ? ProcessLauncher(start) : new Process { StartInfo = start };
+        if (process == null)
             return new("WORKER_START_FAILED", request.Kind, request.Value, Recovery: "NOT_NEEDED");
 
-        using var registration = stop.Register(() => { try { process.StandardInput.Close(); } catch { } });
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        var exited = process.WaitForExitAsync();
-
-        // 阶段 1：目标操作阶段（由 stop 令牌与 TargetPhaseTimeout 控制）
-        if (await Task.WhenAny(exited, Task.Delay(TargetPhaseTimeout, stop)) != exited)
+        stop.ThrowIfCancellationRequested();
+        if (!process.Start())
         {
             try
             {
-                process.StandardInput.Close();
+                process.Dispose();
             }
             catch { }
-
-            // 阶段 2：恢复执行阶段（脱离已取消的 stop 令牌，给予子进程充分等待时限）
-            if (await Task.WhenAny(exited, Task.Delay(RecoveryWaitTimeout)) != exited)
-            {
-                // 超时但底层工作者仍在执行恢复，严禁强制杀死以防截断回滚与提前释放互斥锁约束。
-                // 纳入后台恢复跟踪，保留未确认状态与硬件互斥锁定。
-                RecoveryProcessTracker.Track(process, @"Global\PCControlCenter.ThinkBookEnergySession", @"Global\PCControlCenter.ThinkBookFanSession");
-                return new("WORKER_TIMEOUT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
-            }
+            return new("WORKER_START_FAILED", request.Kind, request.Value, Recovery: "NOT_NEEDED");
         }
 
-        var json = await output;
-        await errors;
-        if (process.ExitCode != 0 || json.Length > 32768)
-            return new("WORKER_FAILED", request.Kind, request.Value, Recovery: "UNCONFIRMED");
-
+        bool transferred = false;
         try
         {
-            return JsonSerializer.Deserialize<EnergyReceipt>(json) ?? new("INVALID_RECEIPT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+            using var registration = stop.Register(() => { try { process.StandardInput.Close(); } catch { } });
+            var output = process.StandardOutput.ReadToEndAsync();
+            var errors = process.StandardError.ReadToEndAsync();
+            var exited = process.WaitForExitAsync();
+
+            // 阶段 1：目标操作阶段（由 stop 令牌与 TargetPhaseTimeout 控制）
+            if (await Task.WhenAny(exited, Task.Delay(TargetPhaseTimeout, stop)) != exited)
+            {
+                try
+                {
+                    process.StandardInput.Close();
+                }
+                catch { }
+
+                // 阶段 2：恢复执行阶段（脱离已取消的 stop 令牌，给予子进程充分等待时限）
+                if (await Task.WhenAny(exited, Task.Delay(RecoveryWaitTimeout)) != exited)
+                {
+                    // 超时但底层工作者仍在执行恢复，所有权真正移交给后台跟踪器，禁止调用方 Dispose
+                    RecoveryProcessTracker.Track(process, requestId, @"Global\PCControlCenter.ThinkBookEnergySession");
+                    transferred = true;
+                    return new("WORKER_TIMEOUT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+                }
+            }
+
+            var json = await output;
+            await errors;
+            if (process.ExitCode != 0 || json.Length > 32768)
+                return new("WORKER_FAILED", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+
+            try
+            {
+                return JsonSerializer.Deserialize<EnergyReceipt>(json) ?? new("INVALID_RECEIPT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+            }
+            catch (JsonException)
+            {
+                return new("INVALID_RECEIPT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+            }
         }
-        catch (JsonException)
+        finally
         {
-            return new("INVALID_RECEIPT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+            if (!transferred && process != null)
+            {
+                try
+                {
+                    process.Dispose();
+                }
+                catch { }
+            }
         }
     }
 }

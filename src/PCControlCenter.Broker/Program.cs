@@ -62,18 +62,39 @@ try
                 {
                     if (request.Operation == "fan-trial")
                     {
-                        var receipt = await FanSessionRunner.RunAsync(request.Trial!, stop.Token);
+                        var receipt = await FanSessionRunner.RunAsync(request.Trial!, stop.Token, request.RequestId);
                         response = new(BrokerProtocol.Version, request.RequestId, "OK", Receipt: receipt);
+                        SessionReceiptStore.WriteReceipt(new SessionReceiptRecord(
+                            request.RequestId,
+                            request.Operation,
+                            receipt.Recovery == "UNCONFIRMED" ? "TerminatedUnconfirmed" : "Completed",
+                            receipt.Recovery,
+                            receipt.Code,
+                            TimestampUtc: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
                     }
                     else if (request.Operation == "set-mode")
                     {
-                        var receipt = await ModeSessionRunner.RunAsync(request.Mode!, stop.Token);
+                        var receipt = await ModeSessionRunner.RunAsync(request.Mode!, stop.Token, request.RequestId);
                         response = new(BrokerProtocol.Version, request.RequestId, "OK", ModeReceipt: receipt);
+                        SessionReceiptStore.WriteReceipt(new SessionReceiptRecord(
+                            request.RequestId,
+                            request.Operation,
+                            receipt.Recovery == "UNCONFIRMED" ? "TerminatedUnconfirmed" : "Completed",
+                            receipt.Recovery,
+                            receipt.Code,
+                            TimestampUtc: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
                     }
                     else if (request.Operation == "set-energy")
                     {
-                        var receipt = await EnergySessionRunner.RunAsync(request.Energy!, stop.Token);
+                        var receipt = await EnergySessionRunner.RunAsync(request.Energy!, stop.Token, request.RequestId);
                         response = new(BrokerProtocol.Version, request.RequestId, "OK", EnergyReceipt: receipt);
+                        SessionReceiptStore.WriteReceipt(new SessionReceiptRecord(
+                            request.RequestId,
+                            request.Operation,
+                            receipt.Recovery == "UNCONFIRMED" ? "TerminatedUnconfirmed" : "Completed",
+                            receipt.Recovery,
+                            receipt.Code,
+                            TimestampUtc: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
                     }
                 }
                 finally
@@ -91,7 +112,14 @@ try
     catch (ProbeException e) { response = new(BrokerProtocol.Version, request.RequestId, e.Code == "ACCESS_DENIED" ? "ACCESS_DENIED" : "PROBE_FAILED"); }
     catch (Exception) { response = new(BrokerProtocol.Version, request.RequestId, "BROKER_READ_FAILED"); }
     stage = 40;
-    await BrokerProtocol.SendAsync(pipe, response, deadline.Token);
+    try
+    {
+        await BrokerProtocol.SendAsync(pipe, response, deadline.Token);
+    }
+    catch (Exception)
+    {
+        // 客户端已提前断开管道，最终回执已持久化在 SessionReceiptStore 中
+    }
     return 0;
 }
 catch (Exception) { return stage + 100; }

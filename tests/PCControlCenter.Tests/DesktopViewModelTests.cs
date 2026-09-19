@@ -414,28 +414,82 @@ static class DesktopViewModelTests
         PCControlCenter.Providers.Windows.RecoveryProcessTracker.ClearForTesting();
         check(!PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "initially no in-flight recovery processes");
 
-        // 启动一个短期运行的进程模拟后台守护恢复进程
-        var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 3 > nul")
+        // 注入安全守卫：若任何调用越过预期分支尝试启动真实硬件脚本，立即抛错熔断，绝不触碰生产硬件
+        PCControlCenter.Providers.Windows.ModeSessionRunner.ProcessLauncher = psi =>
+            throw new InvalidOperationException("SAFETY VIOLATION: Test reached real hardware process launch in ModeSessionRunner!");
+        PCControlCenter.Providers.Windows.EnergySessionRunner.ProcessLauncher = psi =>
+            throw new InvalidOperationException("SAFETY VIOLATION: Test reached real hardware process launch in EnergySessionRunner!");
+
+        try
         {
-            CreateNoWindow = true,
-            UseShellExecute = false
-        };
-        var proc = System.Diagnostics.Process.Start(psi);
-        if (proc != null)
+            // 启动显式受控的测试子进程
+            var psi = new System.Diagnostics.ProcessStartInfo(
+                @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+                "-NoProfile -NonInteractive -Command Start-Sleep -Seconds 30")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                int testPid = proc.Id;
+                try
+                {
+                    PCControlCenter.Providers.Windows.RecoveryProcessTracker.Track(proc, "Global\\PCControlCenter.ThinkBookModeSession");
+
+                    // 1. 模拟调用方在 Track 后执行 Dispose（覆盖报告 P1 反例）
+                    proc.Dispose();
+                    await Task.Delay(100);
+
+                    // 即使调用方提前 Dispose 了 Process 句柄，只要子进程依然存活，跟踪器必须正确识别存活
+                    check(PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "in-flight recovery remains active after caller disposes Process instance");
+
+                    // 2. 模式切换与能源运行器受到在途恢复约束，直接返回 BUSY
+                    var modeReceipt = await PCControlCenter.Providers.Windows.ModeSessionRunner.RunAsync(new ModeRequest(1), CancellationToken.None);
+                    check(modeReceipt.Code == "BUSY", "mode session runner rejects writes with BUSY while in-flight recovery is active");
+
+                    var energyReceipt = await PCControlCenter.Providers.Windows.EnergySessionRunner.RunAsync(new EnergyRequest("charge", 1), CancellationToken.None);
+                    check(energyReceipt.Code == "BUSY", "energy session runner rejects writes with BUSY while in-flight recovery is active");
+                }
+                finally
+                {
+                    // 显式清理测试子进程
+                    try
+                    {
+                        using var live = System.Diagnostics.Process.GetProcessById(testPid);
+                        if (!live.HasExited)
+                        {
+                            live.Kill(true);
+                            await live.WaitForExitAsync();
+                        }
+                    }
+                    catch (ArgumentException) { }
+                    catch { }
+
+                    PCControlCenter.Providers.Windows.RecoveryProcessTracker.ClearForTesting();
+                }
+
+                check(!PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "recovery tracker cleared after testing");
+
+                // 3. 验收安全隔离：故意在模拟跟踪器清空后调用 RunAsync，断言触发安全熔断器而不是执行硬件代码
+                bool safetyTriggered = false;
+                try
+                {
+                    await PCControlCenter.Providers.Windows.ModeSessionRunner.RunAsync(new ModeRequest(1), CancellationToken.None);
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("SAFETY VIOLATION"))
+                {
+                    safetyTriggered = true;
+                }
+                check(safetyTriggered, "ProcessLauncher safety guard reliably intercepts unconstrained calls and prevents hardware access");
+            }
+        }
+        finally
         {
-            PCControlCenter.Providers.Windows.RecoveryProcessTracker.Track(proc, "Global\\PCControlCenter.ThinkBookModeSession");
-            check(PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "in-flight recovery is active while process runs");
-
-            // 模式切换与能源运行器应被约束，返回 BUSY
-            var modeReceipt = await PCControlCenter.Providers.Windows.ModeSessionRunner.RunAsync(new ModeRequest(1), CancellationToken.None);
-            check(modeReceipt.Code == "BUSY", "mode session runner rejects writes with BUSY while in-flight recovery is active");
-
-            var energyReceipt = await PCControlCenter.Providers.Windows.EnergySessionRunner.RunAsync(new EnergyRequest("charge", 1), CancellationToken.None);
-            check(energyReceipt.Code == "BUSY", "energy session runner rejects writes with BUSY while in-flight recovery is active");
-
-            // 清理测试进程
-            PCControlCenter.Providers.Windows.RecoveryProcessTracker.ClearForTesting();
-            check(!PCControlCenter.Providers.Windows.RecoveryProcessTracker.HasInFlightRecovery, "recovery tracker cleared after testing");
+            // 恢复生产启动器
+            PCControlCenter.Providers.Windows.ModeSessionRunner.ProcessLauncher = null;
+            PCControlCenter.Providers.Windows.EnergySessionRunner.ProcessLauncher = null;
         }
     }
 
