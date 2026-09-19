@@ -42,6 +42,7 @@ public static class EnergySessionRunner
         var errors = process.StandardError.ReadToEndAsync();
         var exited = process.WaitForExitAsync();
 
+        // 阶段 1：目标操作阶段（由 stop 令牌与 20 秒目标时限控制）
         if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(20), stop)) != exited)
         {
             try
@@ -49,11 +50,13 @@ public static class EnergySessionRunner
                 process.StandardInput.Close();
             }
             catch { }
-            if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(15))) != exited)
+
+            // 阶段 2：恢复执行阶段（不使用已取消的 stop 令牌，给予子进程充分的恢复完成硬时限）
+            if (await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(60))) != exited)
             {
                 try
                 {
-                    process.Kill();
+                    process.Kill(true);
                 }
                 catch { }
                 return new("WORKER_TIMEOUT", request.Kind, request.Value, Recovery: "UNCONFIRMED");

@@ -22,6 +22,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly WindowsProbe probe = new();
     private readonly IBrightnessService brightnessService;
     private readonly IProfileStorage profileStorage;
+    private readonly IBrokerExecutor brokerExecutor;
     private DeviceIdentity? currentIdentity;
     private string deviceTitle = "ThinkBook 16p G6 IAX";
     private string cpuName = "处理器加载中…";
@@ -341,20 +342,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public MainViewModel() : this(new WindowsBrightnessService(), new JsonProfileStorage())
+    public MainViewModel() : this(new WindowsBrightnessService(), new JsonProfileStorage(), new RealBrokerExecutor())
     {
     }
 
-    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage)
+    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage) : this(brightnessService, profileStorage, new RealBrokerExecutor())
+    {
+    }
+
+    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor)
     {
         this.brightnessService = brightnessService;
         this.profileStorage = profileStorage;
+        this.brokerExecutor = brokerExecutor;
         for (int i = 0; i < 60; i++)
         {
             CpuHistory.Enqueue(0);
             GpuHistory.Enqueue(0);
         }
-        LoadProfiles();
+        PopulateDefaultProfiles();
+    }
+
+    public void SetIdentityForTesting(DeviceIdentity identity)
+    {
+        currentIdentity = identity;
+        DeviceTitle = identity.Model;
     }
 
     public async Task<bool> SaveProfilesAsync(CancellationToken ct = default)
@@ -377,24 +389,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public void SaveProfiles() => SaveProfilesAsync().GetAwaiter().GetResult();
-
-    public void LoadProfiles()
+    private void PopulateDefaultProfiles()
     {
-        try
-        {
-            var items = profileStorage.LoadProfilesAsync().GetAwaiter().GetResult();
-            if (items != null && items.Count > 0)
-            {
-                Profiles.Clear();
-                foreach (var item in items)
-                    Profiles.Add(item);
-                SelectedProfile = Profiles[0];
-                return;
-            }
-        }
-        catch { }
-
         Profiles.Clear();
         Profiles.Add(new()
         {
@@ -420,6 +416,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
         SelectedProfile = Profiles[0];
     }
 
+    public async Task LoadProfilesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var items = await profileStorage.LoadProfilesAsync(ct);
+            if (items != null && items.Count > 0)
+            {
+                Profiles.Clear();
+                foreach (var item in items)
+                    Profiles.Add(item);
+                SelectedProfile = Profiles[0];
+                return;
+            }
+        }
+        catch { }
+
+        PopulateDefaultProfiles();
+    }
+
     public void AddLog(string message)
     {
         var line = $"{DateTime.Now:HH:mm:ss}  {message}";
@@ -433,6 +448,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task InitializeAsync(CancellationToken ct = default)
     {
+        await LoadProfilesAsync(ct);
         try
         {
             currentIdentity = await WindowsProbe.IdentifyAsync(probe, ct);
@@ -615,7 +631,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         try
         {
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "set-mode", currentIdentity, Mode: new ModeRequest(targetMode));
-            var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
+            var resp = await brokerExecutor.ExecuteAsync(req, CancellationToken.None);
             if (resp.Code == "OK" && resp.ModeReceipt is { } mr)
             {
                 if (mr.Code == "COMPLETED")
@@ -662,12 +678,21 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         AddLog($"正在应用场景配置: {p.Name} (模式={p.Mode}, 亮度={p.Brightness}, 风扇={p.FanKind})");
 
+        // 校验 FanKind 必须属于受支持范围
+        if (p.FanKind is not ("auto" or "full"))
+        {
+            AddLog($"场景应用拒绝: 不支持的风扇模式 '{p.FanKind}'");
+            StatusText = $"场景应用失败: 不支持的风扇模式 '{p.FanKind}'";
+            lastErrorTimestamp = DateTime.UtcNow;
+            return false;
+        }
+
         // 步骤 1：性能模式
         var modeOk = await SetPerformanceModeAsync(p.Mode);
         if (!modeOk)
         {
             AddLog($"场景应用中止: 模式切换至 {p.Mode} 未成功，停止执行亮度与风扇调节");
-            StatusText = $"场景应用中止: 性能模式切换未确认";
+            StatusText = "场景应用中止: 性能模式切换未确认";
             return false;
         }
 
@@ -676,19 +701,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (!brightRes.Success)
         {
             AddLog($"场景应用中止: 亮度设置至 {p.Brightness}% 失败 ({brightRes.Status})，停止执行风扇调节");
-            StatusText = $"场景应用中止: 亮度设置未成功";
+            StatusText = "场景应用中止: 亮度设置未成功";
             return false;
         }
 
         // 步骤 3：风扇控制
+        FanOperationResult fanRes;
         if (p.FanKind == "full")
         {
             // 使用真正的 full 模式和 30 秒受控试运行语义
-            await RunFanTrialAsync("full", 0, 0, 30);
+            fanRes = await RunFanTrialAsync("full", 0, 0, 30);
         }
-        else if (p.FanKind == "auto")
+        else
         {
-            await RestoreFanAutoAsync();
+            fanRes = await RestoreFanAutoAsync();
+        }
+
+        if (!fanRes.Success)
+        {
+            AddLog($"场景应用中止: 风扇调节未成功 ({fanRes.Status}, Recovery={fanRes.Recovery})");
+            StatusText = $"场景应用中止: 风扇调节未确认 ({fanRes.Status})";
+            return false;
         }
 
         AddLog($"场景配置应用完成: {p.Name}");
@@ -706,7 +739,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         try
         {
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "set-energy", currentIdentity, Energy: new EnergyRequest(kind, targetValue));
-            var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
+            var resp = await brokerExecutor.ExecuteAsync(req, CancellationToken.None);
             if (resp.Code == "OK" && resp.EnergyReceipt is { } er)
             {
                 if (er.Code == "COMPLETED")
@@ -768,7 +801,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         try
         {
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "read-fans", currentIdentity);
-            var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
+            var resp = await brokerExecutor.ExecuteAsync(req, CancellationToken.None);
             if (resp.Code == "OK" && resp.Fan1.HasValue && resp.Fan2.HasValue)
             {
                 Fan1Rpm = resp.Fan1.Value;
@@ -797,32 +830,41 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public async Task RestoreFanAutoAsync()
+    public async Task<FanOperationResult> RestoreFanAutoAsync()
     {
         if (activeFanTrialCts != null)
         {
             AddLog("正在中止当前风扇试运行并恢复固件自动控制…");
             StatusText = "正在中止试运行并请求恢复固件自动控制…";
             activeFanTrialCts.Cancel();
-            return;
+            return new FanOperationResult(false, "Busy", Message: "正在中止先前试运行");
         }
 
         if (IsBusy || currentIdentity is null)
-            return;
+            return new FanOperationResult(false, "Busy", Message: "系统忙碌或未识别");
+
         IsBusy = true;
         StatusText = "正在请求固件恢复风扇自动控制…";
         AddLog("请求风扇恢复自动模式 (auto)");
+        FanOperationResult result;
         try
         {
             var trial = new FanTrial("auto", 0, 0, 0);
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "fan-trial", currentIdentity, Trial: trial);
-            var resp = await BrokerClient.ExecuteAsync(req, CancellationToken.None);
+            var resp = await brokerExecutor.ExecuteAsync(req, CancellationToken.None);
             var uiStatus = FanStatusMapper.MapRestoreAuto(resp, cancelled: false);
             FanStateText = uiStatus.FanStateText;
             StatusText = uiStatus.StatusText;
             AddLog($"恢复自动回执: {uiStatus.StatusText}");
             if (uiStatus.IsError)
+            {
                 lastErrorTimestamp = DateTime.UtcNow;
+                result = new FanOperationResult(false, uiStatus.FanStateText, resp.Receipt?.Recovery, uiStatus.StatusText);
+            }
+            else
+            {
+                result = new FanOperationResult(true, "Completed", resp.Receipt?.Recovery, uiStatus.StatusText);
+            }
         }
         catch (Exception ex)
         {
@@ -830,21 +872,24 @@ public sealed class MainViewModel : INotifyPropertyChanged
             AddLog($"恢复自动异常: {ex.Message}");
             StatusText = $"恢复自动失败: {ex.Message}";
             lastErrorTimestamp = DateTime.UtcNow;
+            result = new FanOperationResult(false, "Failed", null, ex.Message);
         }
         finally
         {
             IsBusy = false;
             await RefreshTelemetryAsync();
         }
+        return result;
     }
 
-    public Task RunFanTrialAsync(int rpm1, int rpm2, int durationSeconds) =>
+    public Task<FanOperationResult> RunFanTrialAsync(int rpm1, int rpm2, int durationSeconds) =>
         RunFanTrialAsync("manual", rpm1, rpm2, durationSeconds);
 
-    public async Task RunFanTrialAsync(string mode, int rpm1, int rpm2, int durationSeconds)
+    public async Task<FanOperationResult> RunFanTrialAsync(string mode, int rpm1, int rpm2, int durationSeconds)
     {
         if (IsBusy || currentIdentity is null)
-            return;
+            return new FanOperationResult(false, "Busy", Message: "系统忙碌或未识别");
+
         IsBusy = true;
         StatusText = $"正在启动限时试运行 ({mode}: {rpm1}/{rpm2} RPM, {durationSeconds}s)…";
         AddLog($"启动风扇受控试运行: 模式={mode}, Fan1={rpm1}, Fan2={rpm2}, 持续={durationSeconds}秒");
@@ -852,11 +897,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
         activeFanTrialCts = cts;
         bool cancelled = false;
         BrokerResponse? resp = null;
+        FanOperationResult result;
         try
         {
             var trial = new FanTrial(mode, rpm1, rpm2, durationSeconds);
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "fan-trial", currentIdentity, Trial: trial);
-            resp = await BrokerClient.ExecuteAsync(req, cts.Token);
+            resp = await brokerExecutor.ExecuteAsync(req, cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -868,21 +914,63 @@ public sealed class MainViewModel : INotifyPropertyChanged
             AddLog($"风扇试运行异常: {ex.Message}");
             StatusText = $"试运行失败: {ex.Message}";
             lastErrorTimestamp = DateTime.UtcNow;
+            result = new FanOperationResult(false, "Failed", null, ex.Message);
         }
-        finally
+
+        try
         {
-            activeFanTrialCts = null;
-            if (resp != null || cancelled)
+            if (cancelled)
             {
-                var uiStatus = FanStatusMapper.MapTrial(resp, cancelled, mode);
+                FanStateText = "取消中 (恢复中)";
+                StatusText = "风扇试运行已取消，正在等待底层恢复完成…";
+                AddLog("已触发试运行取消，正在等待硬件控制锁释放…");
+
+                using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                var released = await brokerExecutor.WaitForRecoveryCompleteAsync(waitCts.Token);
+                if (released)
+                {
+                    FanStateText = "已取消 (未确认)";
+                    StatusText = "风扇试运行已取消，底层控制已释放 (未独立确认自动)";
+                    AddLog("底层硬件锁已释放，解除控制锁定");
+                }
+                else
+                {
+                    FanStateText = "恢复未确认";
+                    StatusText = "风扇试运行已取消，但未能确认恢复完成";
+                    AddLog("恢复超时或未能确认底层控制锁释放");
+                    lastErrorTimestamp = DateTime.UtcNow;
+                }
+                result = new FanOperationResult(false, "Cancelled", "UNCONFIRMED");
+            }
+            else if (resp != null)
+            {
+                var uiStatus = FanStatusMapper.MapTrial(resp, cancelled: false, mode);
                 FanStateText = uiStatus.FanStateText;
                 StatusText = uiStatus.StatusText;
                 AddLog($"风扇试运行回执: {uiStatus.StatusText}");
                 if (uiStatus.IsError)
+                {
                     lastErrorTimestamp = DateTime.UtcNow;
+                    result = new FanOperationResult(false, uiStatus.FanStateText, resp.Receipt?.Recovery, uiStatus.StatusText);
+                }
+                else
+                {
+                    result = new FanOperationResult(true, "Completed", resp.Receipt?.Recovery, uiStatus.StatusText);
+                }
             }
+            else
+            {
+                result = new FanOperationResult(false, "Failed", null, "无回执数据");
+            }
+        }
+        finally
+        {
+            activeFanTrialCts = null;
             IsBusy = false;
             await RefreshTelemetryAsync();
         }
+        return result;
     }
 }
+
+public record FanOperationResult(bool Success, string Status, string? Recovery = null, string? Message = null);

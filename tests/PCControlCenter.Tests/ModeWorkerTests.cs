@@ -84,7 +84,7 @@ static class ModeWorkerTests
         try
         {
             var output = process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));
             if (process.ExitCode != 0)
                 throw new Exception("Mock worker failed: " + await errors);
             var lines = (await output).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);

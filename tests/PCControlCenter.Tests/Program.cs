@@ -422,7 +422,8 @@ finally { if (File.Exists(reportPath)) File.Delete(reportPath); }
 await FanWorkerTests.RunAllAsync(Check);
 await ModeWorkerTests.RunAllAsync(Check);
 await EnergyWorkerTests.RunAllAsync(Check);
-DesktopViewModelTests.RunAll(Check);
+await DesktopViewModelTests.RunAllAsync(Check);
+await BrightnessScriptTests.RunAllAsync(Check);
 FanStatusMapperTests.RunAll(Check);
 foreach (var badInterval in new[] { 0, 31 })
 {

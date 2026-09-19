@@ -16,76 +16,145 @@ public interface IBrightnessService
     Task<int?> GetBrightnessAsync(CancellationToken ct = default);
 }
 
-public sealed class WindowsBrightnessService : IBrightnessService
+public class WindowsBrightnessService : IBrightnessService
 {
-    private readonly object gate = new();
-    private int? pendingTarget;
-    private Task<BrightnessResult>? currentRunningTask;
+    private sealed record PendingRequest(int Percent, CancellationToken Cancellation, TaskCompletionSource<BrightnessResult> Completion);
 
-    public async Task<BrightnessResult> SetBrightnessAsync(int percent, CancellationToken ct = default)
+    private readonly object gate = new();
+    private PendingRequest? pendingRequest;
+    private bool isProcessing;
+    private readonly Func<int, CancellationToken, Task<BrightnessResult>> executor;
+    private readonly Func<CancellationToken, Task<int?>> getter;
+
+    public WindowsBrightnessService() : this(ExecuteSetBrightnessAsync, ExecuteGetBrightnessAsync)
     {
+    }
+
+    public WindowsBrightnessService(
+        Func<int, CancellationToken, Task<BrightnessResult>> executor,
+        Func<CancellationToken, Task<int?>>? getter = null)
+    {
+        this.executor = executor;
+        this.getter = getter ?? ExecuteGetBrightnessAsync;
+    }
+
+    public static string GetScript()
+    {
+        using var stream = typeof(WindowsBrightnessService).Assembly.GetManifestResourceStream("PCControlCenter.Desktop.Services.BrightnessSession.ps1");
+        if (stream != null)
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            return reader.ReadToEnd();
+        }
+
+        var directPath = Path.Combine(AppContext.BaseDirectory, "Services", "BrightnessSession.ps1");
+        if (File.Exists(directPath))
+            return File.ReadAllText(directPath, Encoding.UTF8);
+
+        throw new FileNotFoundException("BrightnessSession.ps1 resource not found");
+    }
+
+    public Task<BrightnessResult> SetBrightnessAsync(int percent, CancellationToken ct = default)
+    {
+        if (ct.IsCancellationRequested)
+            return Task.FromResult(new BrightnessResult(false, "Cancelled", null, "Operation cancelled by caller"));
+
         percent = Math.Clamp(percent, 0, 100);
+
+        var tcs = new TaskCompletionSource<BrightnessResult>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         lock (gate)
         {
-            pendingTarget = percent;
-            if (currentRunningTask == null || currentRunningTask.IsCompleted)
+            if (pendingRequest != null)
             {
-                currentRunningTask = ProcessQueueAsync();
+                pendingRequest.Completion.TrySetResult(new BrightnessResult(false, "Cancelled", null, "Superseded before write"));
+            }
+
+            pendingRequest = new PendingRequest(percent, ct, tcs);
+
+            if (!isProcessing)
+            {
+                isProcessing = true;
+                _ = Task.Run(ProcessQueueAsync);
             }
         }
 
-        return await currentRunningTask;
+        if (ct.CanBeCanceled)
+        {
+            var reg = ct.Register(() =>
+            {
+                lock (gate)
+                {
+                    if (pendingRequest?.Completion == tcs)
+                    {
+                        pendingRequest = null;
+                        tcs.TrySetResult(new BrightnessResult(false, "Cancelled", null, "Operation cancelled by caller"));
+                    }
+                }
+            });
+            _ = tcs.Task.ContinueWith(_ => reg.Dispose(), TaskScheduler.Default);
+        }
+
+        return tcs.Task;
     }
 
-    private async Task<BrightnessResult> ProcessQueueAsync()
+    private async Task ProcessQueueAsync()
     {
-        BrightnessResult lastResult = new(false, "Unsupported", null);
         while (true)
         {
-            int target;
+            PendingRequest? current;
             lock (gate)
             {
-                if (!pendingTarget.HasValue)
+                current = pendingRequest;
+                pendingRequest = null;
+                if (current == null)
                 {
+                    isProcessing = false;
                     break;
                 }
-                target = pendingTarget.Value;
-                pendingTarget = null;
             }
 
-            lastResult = await ExecuteSetBrightnessAsync(target);
+            if (current.Cancellation.IsCancellationRequested)
+            {
+                current.Completion.TrySetResult(new BrightnessResult(false, "Cancelled", null, "Operation cancelled by caller"));
+                continue;
+            }
+
+            try
+            {
+                var result = await executor(current.Percent, current.Cancellation);
+                current.Completion.TrySetResult(result);
+            }
+            catch (OperationCanceledException)
+            {
+                current.Completion.TrySetResult(new BrightnessResult(false, "Cancelled", null, "Operation cancelled by caller"));
+            }
+            catch (Exception ex)
+            {
+                current.Completion.TrySetResult(new BrightnessResult(false, "Failed", null, ex.Message));
+            }
         }
-        return lastResult;
     }
 
-    private static async Task<BrightnessResult> ExecuteSetBrightnessAsync(int percent)
+    public static async Task<BrightnessResult> ExecuteSetBrightnessAsync(int percent, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsWindows())
             return new(false, "Unsupported", null, "Not Windows");
 
-        var psPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\WindowsPowerShell\v1.0\powershell.exe");
-        var script = $$"""
-        $ErrorActionPreference='Stop'
-        try {
-            $m = @(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightnessMethods -ErrorAction SilentlyContinue)
-            if ($null -eq $m -or $m.Count -eq 0) {
-                @{ Status = 'Unsupported' } | ConvertTo-Json -Compress
-                exit 0
-            }
-            $target = [byte]{{percent}}
-            $inv = Invoke-CimMethod -InputObject $m[0] -MethodName WmiSetBrightness -Arguments @{ Timeout = 2; Brightness = $target } -ErrorAction Stop
-            $cur = $null
-            try {
-                $b = @(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness -ErrorAction SilentlyContinue)
-                if ($b -and $b.Count -gt 0) { $cur = [int]$b[0].CurrentBrightness }
-            } catch { }
-            @{ Status = 'Success'; Confirmed = ($cur ?? $target) } | ConvertTo-Json -Compress
-        } catch {
-            @{ Status = 'Failed'; Message = $_.Exception.Message } | ConvertTo-Json -Compress
+        string script;
+        try
+        {
+            script = GetScript();
         }
-        """;
+        catch (Exception ex)
+        {
+            return new(false, "Failed", null, "Script load failed: " + ex.Message);
+        }
 
+        var prefix = $"$percent = {percent};\n";
+        var fullScript = prefix + script;
+
+        var psPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\WindowsPowerShell\v1.0\powershell.exe");
         var start = new ProcessStartInfo(psPath)
         {
             UseShellExecute = false,
@@ -94,19 +163,20 @@ public sealed class WindowsBrightnessService : IBrightnessService
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8
         };
-        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(script)) })
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(fullScript)) })
             start.ArgumentList.Add(a);
 
         using var process = new Process { StartInfo = start };
         try
         {
             if (!process.Start())
-                return new(false, "Failed", null, "Failed to start process");
+                return new(false, "Failed", null, "Failed to start powershell process");
 
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(8));
             var exitTask = process.WaitForExitAsync(cts.Token);
 
             try
@@ -121,6 +191,9 @@ public sealed class WindowsBrightnessService : IBrightnessService
                         process.Kill(true);
                 }
                 catch { }
+
+                if (ct.IsCancellationRequested)
+                    return new(false, "Cancelled", null, "Brightness adjustment cancelled");
                 return new(false, "Timeout", null, "Brightness adjustment timed out");
             }
 
@@ -136,8 +209,12 @@ public sealed class WindowsBrightnessService : IBrightnessService
             var status = root.GetProperty("Status").GetString() ?? "Failed";
             if (status == "Success")
             {
-                int confirmed = root.TryGetProperty("Confirmed", out var c) ? c.GetInt32() : percent;
+                int? confirmed = root.TryGetProperty("Confirmed", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetInt32() : null;
                 return new(true, "Success", confirmed);
+            }
+            else if (status == "SuccessUnconfirmed")
+            {
+                return new(true, "SuccessUnconfirmed", null);
             }
             else if (status == "Unsupported")
             {
@@ -161,17 +238,54 @@ public sealed class WindowsBrightnessService : IBrightnessService
         }
     }
 
-    public async Task<int?> GetBrightnessAsync(CancellationToken ct = default)
+    public Task<int?> GetBrightnessAsync(CancellationToken ct = default) => getter(ct);
+
+    public static async Task<int?> ExecuteGetBrightnessAsync(CancellationToken ct = default)
     {
         if (!OperatingSystem.IsWindows())
             return null;
+
+        var psPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\WindowsPowerShell\v1.0\powershell.exe");
+        var script = "$ErrorActionPreference='SilentlyContinue'; $b = @(Get-CimInstance -Namespace root/wmi -ClassName WmiMonitorBrightness | Where-Object { $_.Active }); if ($b.Count -gt 0 -and $null -ne $b[0].CurrentBrightness) { [int]$b[0].CurrentBrightness }";
+
+        var start = new ProcessStartInfo(psPath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8
+        };
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(script)) })
+            start.ArgumentList.Add(a);
+
+        using var process = new Process { StartInfo = start };
         try
         {
-            return await Task.Run(() =>
-            {
-                return (int?)null;
-            }, ct);
+            if (!process.Start())
+                return null;
+
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(4));
+            var exitTask = process.WaitForExitAsync(cts.Token);
+
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            await exitTask;
+
+            var output = (await outputTask).Trim();
+            if (int.TryParse(output, out var val) && val is >= 0 and <= 100)
+                return val;
+            return null;
         }
-        catch { return null; }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(true);
+            }
+            catch { }
+            return null;
+        }
     }
 }

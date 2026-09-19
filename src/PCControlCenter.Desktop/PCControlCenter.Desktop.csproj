@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Services\BrightnessSession.ps1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="Theme.xaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Control.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
