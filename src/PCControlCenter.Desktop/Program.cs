@@ -10,14 +10,35 @@ namespace PCControlCenter.Desktop;
 
 public static class Program
 {
+    private const string MutexName = "Local\\PCControlCenter.Desktop.Instance";
+    private const string WakeEventName = "Local\\PCControlCenter.Desktop.WakeEvent";
+
     [STAThread]
     public static void Main(string[] args)
     {
-        using var mutex = new Mutex(true, "Local\\PCControlCenter.Desktop.Instance", out bool isFirstInstance);
+        using var mutex = new Mutex(true, MutexName, out bool isFirstInstance);
         if (!isFirstInstance && !args.Contains("--multi-instance"))
         {
-            MessageBox.Show("PC Control Center 已在运行中，请从任务栏或系统托盘打开。", "PC Control Center", MessageBoxButton.OK, MessageBoxImage.Information);
+            try
+            {
+                using var existingWakeEvent = EventWaitHandle.OpenExisting(WakeEventName);
+                existingWakeEvent.Set();
+            }
+            catch
+            {
+                MessageBox.Show("PC Control Center 已在运行中，请从任务栏或系统托盘打开。", "PC Control Center", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
             return;
+        }
+
+        EventWaitHandle? wakeEvent = null;
+        if (isFirstInstance)
+        {
+            try
+            {
+                wakeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, WakeEventName);
+            }
+            catch { }
         }
 
         var app = new Application();
@@ -54,6 +75,32 @@ public static class Program
             window.WindowState = WindowState.Minimized;
             window.ShowInTaskbar = false;
         }
-        app.Run(window);
+
+        RegisteredWaitHandle? waitRegistration = null;
+        try
+        {
+            if (wakeEvent != null)
+            {
+                waitRegistration = ThreadPool.RegisterWaitForSingleObject(
+                    wakeEvent,
+                    (state, timedOut) =>
+                    {
+                        if (!timedOut && state is MainWindow win)
+                        {
+                            win.RestoreAndActivate();
+                        }
+                    },
+                    window,
+                    -1,
+                    false);
+            }
+
+            app.Run(window);
+        }
+        finally
+        {
+            waitRegistration?.Unregister(null);
+            wakeEvent?.Dispose();
+        }
     }
 }

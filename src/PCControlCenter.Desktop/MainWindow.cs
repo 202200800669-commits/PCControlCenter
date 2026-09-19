@@ -70,7 +70,7 @@ public sealed class MainWindow : Window
             if (startMinimized)
             {
                 Hide();
-                tray?.ShowBalloonTip(1500, "PC Control Center", "已在后台静默运行，双击托盘图标打开主界面。", Forms.ToolTipIcon.Info);
+                tray?.ShowBalloonTip(1500, "PC Control Center", "已在后台静默运行，点击托盘图标打开主界面。", Forms.ToolTipIcon.Info);
             }
             await vm.InitializeAsync();
             timer.Start();
@@ -81,7 +81,7 @@ public sealed class MainWindow : Window
             if (WindowState == WindowState.Minimized && vm.MinimizeToTray)
             {
                 Hide();
-                tray?.ShowBalloonTip(1000, "PC Control Center", "已收起到系统托盘，双击托盘图标恢复窗口。", Forms.ToolTipIcon.Info);
+                tray?.ShowBalloonTip(1000, "PC Control Center", "已收起到系统托盘，点击托盘图标恢复窗口。", Forms.ToolTipIcon.Info);
             }
         };
 
@@ -289,6 +289,31 @@ public sealed class MainWindow : Window
         }
     }
 
+    public void RestoreAndActivate()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(RestoreAndActivate);
+            return;
+        }
+
+        if (Visibility != Visibility.Visible)
+        {
+            Show();
+        }
+
+        if (WindowState == WindowState.Minimized)
+        {
+            WindowState = WindowState.Normal;
+        }
+
+        ShowInTaskbar = true;
+        Topmost = true;
+        Topmost = false;
+        Activate();
+        Focus();
+    }
+
     private void SetupTray()
     {
         try
@@ -301,20 +326,17 @@ public sealed class MainWindow : Window
                 Text = "PC Control Center",
                 Visible = true
             };
-            tray.DoubleClick += (s, e) => Dispatcher.Invoke(() =>
+            tray.MouseClick += (s, e) =>
             {
-                Show();
-                WindowState = WindowState.Normal;
-                Activate();
-            });
+                if (e.Button == Forms.MouseButtons.Left)
+                {
+                    RestoreAndActivate();
+                }
+            };
+            tray.DoubleClick += (s, e) => RestoreAndActivate();
 
             var menu = new Forms.ContextMenuStrip();
-            menu.Items.Add("打开主界面", null, (s, e) => Dispatcher.Invoke(() =>
-            {
-                Show();
-                WindowState = WindowState.Normal;
-                Activate();
-            }));
+            menu.Items.Add("打开主界面", null, (s, e) => RestoreAndActivate());
             menu.Items.Add("刷新遥测状态", null, (s, e) => Dispatcher.Invoke(async () => await vm.RefreshTelemetryAsync()));
             menu.Items.Add(new Forms.ToolStripSeparator());
             menu.Items.Add("退出控制中心", null, (s, e) => Dispatcher.Invoke(() =>
