@@ -5,6 +5,7 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Markup;
 using System.Windows.Media;
+using PCControlCenter.Desktop.Services;
 
 namespace PCControlCenter.Desktop;
 
@@ -54,7 +55,8 @@ public static class Program
             e.Handled = true;
         };
 
-        app.Resources["Accent"] = new SolidColorBrush(Color.FromRgb(39, 143, 205));
+        Appearance.Preview = args.Contains("--preview") || args.Contains("--render-preview") || args.Contains("--render-motion");
+        Appearance.Load();
 
         try
         {
@@ -69,7 +71,20 @@ public static class Program
         catch { }
 
         bool startMinimized = args.Contains("--minimized");
-        var window = new MainWindow(startMinimized);
+        var window = new MainWindow(startMinimized, Appearance.Preview);
+        if (args.Contains("--render-motion"))
+        {
+            PreviewRenderer.RenderMotion(window, args[Array.IndexOf(args, "--render-motion") + 1]);
+            wakeEvent?.Dispose();
+            return;
+        }
+        if (args.Contains("--render-preview"))
+        {
+            int index = Array.IndexOf(args, "--render-preview");
+            PreviewRenderer.Render(window, args[index + 1]);
+            wakeEvent?.Dispose();
+            return;
+        }
         if (startMinimized)
         {
             window.WindowState = WindowState.Minimized;

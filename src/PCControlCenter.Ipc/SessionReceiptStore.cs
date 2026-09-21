@@ -14,6 +14,19 @@ public sealed record SessionReceiptRecord(
     string? Message = null,
     long TimestampUtc = 0);
 
+public static class RecoveryOutcome
+{
+    public static bool IsConfirmed(string? recovery, string? code) => recovery switch
+    {
+        "AUTO_COMMANDS_SENT_OVERRIDE_OFF" or "RESTORED_PREVIOUS" => true,
+        "NOT_NEEDED" => code is "COMPLETED" or "CANCELLED_BEFORE_WRITE",
+        _ => false
+    };
+
+    public static string TerminalState(string? recovery, string? code) =>
+        IsConfirmed(recovery, code) ? "Completed" : "TerminatedUnconfirmed";
+}
+
 public static class SessionReceiptStore
 {
     private static readonly object Gate = new();
@@ -36,13 +49,16 @@ public static class SessionReceiptStore
         return baseDir;
     }
 
-    public static void WriteReceipt(SessionReceiptRecord record)
+    public static void WriteReceipt(SessionReceiptRecord record, string? directory = null)
     {
+        if (!Guid.TryParseExact(record.RequestId, "N", out _))
+            throw new ArgumentException("Invalid request id");
         lock (Gate)
         {
             try
             {
-                var dir = GetSessionDirectory();
+                var dir = directory ?? GetSessionDirectory();
+                Directory.CreateDirectory(dir);
                 var targetFile = Path.Combine(dir, $"session_{record.RequestId}.json");
                 var tempFile = Path.Combine(dir, $"session_{record.RequestId}_{Guid.NewGuid():N}.tmp");
                 var json = JsonSerializer.Serialize(record);
@@ -53,18 +69,21 @@ public static class SessionReceiptStore
         }
     }
 
-    public static SessionReceiptRecord? GetReceipt(string requestId)
+    public static SessionReceiptRecord? GetReceipt(string requestId, string? directory = null)
     {
+        if (!Guid.TryParseExact(requestId, "N", out _))
+            return null;
         lock (Gate)
         {
             try
             {
-                var dir = GetSessionDirectory();
+                var dir = directory ?? GetSessionDirectory();
                 var targetFile = Path.Combine(dir, $"session_{requestId}.json");
                 if (!File.Exists(targetFile))
                     return null;
                 var json = File.ReadAllText(targetFile, Encoding.UTF8);
-                return JsonSerializer.Deserialize<SessionReceiptRecord>(json);
+                var record = JsonSerializer.Deserialize<SessionReceiptRecord>(json);
+                return record?.RequestId == requestId ? record : null;
             }
             catch
             {
@@ -75,6 +94,8 @@ public static class SessionReceiptStore
 
     public static void Clear(string requestId)
     {
+        if (!Guid.TryParseExact(requestId, "N", out _))
+            return;
         lock (Gate)
         {
             try

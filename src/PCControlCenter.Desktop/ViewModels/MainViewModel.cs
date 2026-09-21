@@ -24,7 +24,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly IProfileStorage profileStorage;
     private readonly IBrokerExecutor brokerExecutor;
     private DeviceIdentity? currentIdentity;
-    private string deviceTitle = "ThinkBook 16p G6 IAX";
+    private string deviceTitle = "正在识别设备";
     private string cpuName = "处理器加载中…";
     private string cpuLoadText = "— %";
     private double cpuLoad;
@@ -367,8 +367,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         this.brokerExecutor = brokerExecutor;
         for (int i = 0; i < 60; i++)
         {
-            CpuHistory.Enqueue(0);
-            GpuHistory.Enqueue(0);
+            CpuHistory.Enqueue(double.NaN);
+            GpuHistory.Enqueue(double.NaN);
         }
         PopulateDefaultProfiles();
     }
@@ -593,10 +593,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 {
                     GpuLoadText = "—";
                     GpuHistory.Dequeue();
-                    GpuHistory.Enqueue(0);
+                    GpuHistory.Enqueue(double.NaN);
+                    GpuLoad = 0;
                 }
                 string pwr = primary.Power.HasValue ? $"{primary.Power.Value:F1} W" : "— W";
-                GpuDetailText = $"负载 {primary.Utilization:F0}%  ·  {pwr}  ·  NVIDIA GPU (Index {primary.Index})";
+                GpuDetailText = $"负载 {GpuLoadText}  ·  {pwr}";
             }
             else
             {
@@ -604,7 +605,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 GpuTempText = "—";
                 GpuDetailText = "未检测到独立显卡或处于深度休眠";
                 GpuHistory.Dequeue();
-                GpuHistory.Enqueue(0);
+                GpuHistory.Enqueue(double.NaN);
+                GpuLoad = 0;
             }
 
             // 3. Performance Mode & Energy (Only on supported ThinkBook)
@@ -636,6 +638,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
                     var provider = registry.Resolve(currentIdentity);
                     CurrentSnapshot = await provider.ReadAsync(currentIdentity, ct);
+                    CpuName = string.IsNullOrWhiteSpace(CurrentSnapshot.System?.CpuName) ? "处理器信息不可用" : CurrentSnapshot.System.CpuName;
                 }
                 catch { }
             }
@@ -918,6 +921,34 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return result;
     }
 
+    private string? pendingRecoveryRequestId;
+
+    private async Task ObservePendingRecoveryAsync(string requestId)
+    {
+        while (pendingRecoveryRequestId == requestId)
+        {
+            // Keep subsequent controls locked while polling the original request, including late receipts.
+            await Task.Delay(1000);
+            SessionStatus status;
+            try
+            {
+                status = await brokerExecutor.WaitForRecoveryAsync(requestId);
+            }
+            catch { continue; }
+            if (pendingRecoveryRequestId != requestId)
+                return;
+            if (status.State is not (SessionState.RecoveryCompleted or SessionState.NotStarted or SessionState.TerminatedUnconfirmed))
+                continue;
+            pendingRecoveryRequestId = null;
+            FanStateText = status.State == SessionState.RecoveryCompleted ? "自动控制指令已发送" :
+                status.State == SessionState.NotStarted ? "已取消 (未启动)" : "恢复未确认";
+            StatusText = $"已收到最终回执: {status.Recovery ?? "UNCONFIRMED"}";
+            AddLog(StatusText);
+            IsBusy = false;
+            return;
+        }
+    }
+
     public Task<FanOperationResult> RunFanTrialAsync(int rpm1, int rpm2, int durationSeconds) =>
         RunFanTrialAsync("manual", rpm1, rpm2, durationSeconds);
 
@@ -1002,6 +1033,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                     AddLog($"恢复超时或未能确认终态 ({recoveryStatus.Message})");
                     lastErrorTimestamp = DateTime.UtcNow;
                     result = new FanOperationResult(false, "Cancelled", "UNCONFIRMED", recoveryStatus.Message);
+                    pendingRecoveryRequestId = requestId;
                 }
             }
             else if (resp != null)
@@ -1028,7 +1060,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
         finally
         {
             activeFanTrialCts = null;
-            IsBusy = false;
+            IsBusy = pendingRecoveryRequestId != null;
+            if (pendingRecoveryRequestId == requestId)
+                _ = ObservePendingRecoveryAsync(requestId);
             await RefreshTelemetryAsync();
         }
         return result;

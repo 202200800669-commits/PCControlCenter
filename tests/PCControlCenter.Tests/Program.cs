@@ -6,6 +6,12 @@ using PCControlCenter.Providers.Windows;
 using System.Text.Json;
 using System.IO.Compression;
 
+if (args.Length == 4 && args[0] == "--recovery-test-host")
+{
+    await RecoveryLifecycleTests.RunHostAsync(args);
+    return;
+}
+
 var device = new DeviceIdentity("LENOVO", "21R0", "ThinkBook 16p G6 IAX", "R2CN57WW", "Windows");
 int passed = 0;
 void Check(bool condition, string name) { if (!condition) throw new Exception("FAIL: " + name); Console.WriteLine("PASS: " + name); passed++; }
@@ -423,8 +429,10 @@ await FanWorkerTests.RunAllAsync(Check);
 await ModeWorkerTests.RunAllAsync(Check);
 await EnergyWorkerTests.RunAllAsync(Check);
 await DesktopViewModelTests.RunAllAsync(Check);
+DesktopFeedbackTests.Run(Check, snap);
 await BrightnessScriptTests.RunAllAsync(Check);
 FanStatusMapperTests.RunAll(Check);
+await RecoveryLifecycleTests.RunAllAsync(Check);
 foreach (var badInterval in new[] { 0, 31 })
 {
     bool rejected = false;

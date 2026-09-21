@@ -13,6 +13,8 @@ public sealed class OverviewView : StackPanel
 {
     private readonly MainViewModel vm;
     private readonly Canvas graph = new() { Height = 110, ClipToBounds = true };
+    private readonly TextBlock deviceLabel = Text("正在识别设备", 24);
+    private readonly TextBlock processorLabel = Text("—", 12);
     private readonly TextBlock heroModeLabel = Text("—", 20, "#1C4965");
     private readonly TextBlock cpuLoadLabel = Text("— %", 28, "#173C58");
     private readonly TextBlock gpuTempLabel = Text("—", 28, "#173C58");
@@ -49,8 +51,8 @@ public sealed class OverviewView : StackPanel
         });
 
         var titleStack = Stack(
-            Text(vm.DeviceTitle, 26, "#1C4965"),
-            Text(vm.CpuName, 12, "#668CA4")
+            deviceLabel,
+            processorLabel
         );
         titleStack.Margin = new Thickness(6, 4, 0, 0);
         heroLayout.Children.Add(titleStack);
@@ -63,28 +65,19 @@ public sealed class OverviewView : StackPanel
         Grid.SetColumn(modeStatus, 1);
         heroLayout.Children.Add(modeStatus);
 
-        var modeButtons = Row(
-            CreateModeButton("智能", 0),
-            CreateModeButton("节能", 1),
-            CreateModeButton("性能", 3)
-        );
-        modeButtons.Margin = new Thickness(6, 16, 0, 0);
-
-        var heroOuter = Stack(heroLayout, modeButtons);
-        var heroCard = Card(heroOuter);
-        heroCard.Background = new LinearGradientBrush(Color.FromRgb(238, 249, 255), Color.FromRgb(218, 240, 254), new Point(0, 0), new Point(1, 1));
+        var heroCard = Card(heroLayout);
         Children.Add(heroCard);
 
         // Metrics Grid 1: CPU & GPU
         var cpuCard = Card(Stack(
-            Text("CPU 处理器", 12, "#6C8BA2"),
+            Text("CPU", 12, "#6C8BA2"),
             cpuLoadLabel,
             cpuBar,
             Text("实时处理器负载", 11, "#7894AA")
         ));
 
         var gpuCard = Card(Stack(
-            Text("GPU 独立显卡", 12, "#6C8BA2"),
+            Text("GPU", 12, "#6C8BA2"),
             gpuTempLabel,
             gpuBar,
             gpuDetailLabel
@@ -92,7 +85,9 @@ public sealed class OverviewView : StackPanel
         Children.Add(Two(cpuCard, gpuCard));
 
         // Metrics Grid 2: Fans & Memory
-        var readFansBtn = new Button { Content = "提权读取", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 8, 0, 0) };
+        var readFansBtn = new Button { Content = "读取转速", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 8, 0, 0) };
+        readFansBtn.IsEnabled = vm.IsThinkBookSupported && !vm.IsBusy;
+        vm.PropertyChanged += (_, _) => readFansBtn.IsEnabled = vm.IsThinkBookSupported && !vm.IsBusy;
         readFansBtn.Click += async (s, e) => await vm.ReadFansElevatedAsync();
 
         var fansCard = Card(Stack(
@@ -112,21 +107,16 @@ public sealed class OverviewView : StackPanel
 
         // Trend Graph Card
         Children.Add(Card(Stack(
-            Head("系统负载趋势 (CPU / GPU)"),
-            Text("蓝: CPU  ·  紫: GPU", 11, "#7894AA"),
+            Head("负载趋势"),
+            Text("CPU · 主色    GPU · 辅色", 11, "#7894AA"),
             graph
         )));
     }
 
-    private Button CreateModeButton(string title, int mode)
-    {
-        var b = new Button { Content = title, Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(16, 8, 16, 8) };
-        b.Click += async (s, e) => await vm.SetPerformanceModeAsync(mode);
-        return b;
-    }
-
     public void Update()
     {
+        deviceLabel.Text = vm.DeviceTitle;
+        processorLabel.Text = vm.CpuName;
         heroModeLabel.Text = vm.PerformanceModeName;
         cpuLoadLabel.Text = vm.CpuLoadText;
         cpuBar.Value = vm.CpuLoad;
@@ -157,7 +147,7 @@ public sealed class OverviewView : StackPanel
                 X2 = w,
                 Y1 = h * i / 4,
                 Y2 = h * i / 4,
-                Stroke = Brush("#DAEAF4"),
+                Stroke = (System.Windows.Media.Brush)FindResource("SurfaceLine"),
                 StrokeThickness = 1
             });
         }
@@ -165,21 +155,34 @@ public sealed class OverviewView : StackPanel
         // Draw CPU line
         DrawSeries(vm.CpuHistory.ToArray(), vm.AccentColor, w, h);
         // Draw GPU line
-        DrawSeries(vm.GpuHistory.ToArray(), "#8A74CF", w, h);
+        DrawSeries(vm.GpuHistory.ToArray(), Services.Appearance.Current.Secondary, w, h);
     }
 
     private void DrawSeries(double[] data, string colorHex, double w, double h)
     {
         if (data.Length < 2)
             return;
-        var line = new Polyline { Stroke = Brush(colorHex), StrokeThickness = 2 };
+        Polyline Line() => new()
+        {
+            Stroke = Brush(colorHex),
+            StrokeThickness = 2
+        };
+        var line = Line();
         for (int i = 0; i < data.Length; i++)
         {
+            if (!double.IsFinite(data[i]))
+            {
+                if (line.Points.Count > 1)
+                    graph.Children.Add(line);
+                line = Line();
+                continue;
+            }
             double val = Math.Clamp(data[i], 0, 100);
             double x = w * i / (data.Length - 1);
             double y = h * (1.0 - val / 100.0);
             line.Points.Add(new Point(x, y));
         }
-        graph.Children.Add(line);
+        if (line.Points.Count > 1)
+            graph.Children.Add(line);
     }
 }

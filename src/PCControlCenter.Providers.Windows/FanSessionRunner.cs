@@ -61,7 +61,6 @@ public static class FanSessionRunner
             return new("WORKER_START_FAILED", "NOT_NEEDED");
         }
 
-        bool transferred = false;
         try
         {
             using var registration = stop.Register(() => { try { process.StandardInput.Close(); } catch { } });
@@ -77,10 +76,8 @@ public static class FanSessionRunner
                 }
                 catch { }
 
-                // 超时移交给后台跟踪器，所有权移交，调用方 finally 不 Dispose
-                RecoveryProcessTracker.Track(process, requestId, @"Global\PCControlCenter.ThinkBookFanSession");
-                transferred = true;
-                return new("WORKER_TIMEOUT", "UNCONFIRMED");
+                // Recovery outlives client cancellation; the Broker awaits and persists the final receipt.
+                await RecoveryProcessTracker.WaitForCompletionAsync(process, requestId);
             }
 
             var json = await output;
@@ -99,7 +96,7 @@ public static class FanSessionRunner
         }
         finally
         {
-            if (!transferred && process != null)
+            if (process != null)
             {
                 try
                 {

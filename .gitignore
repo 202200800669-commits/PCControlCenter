@@ -3,6 +3,7 @@
 .vs/
 artifacts/
 local/
+app/
 *.user
 *.log
 *.zip

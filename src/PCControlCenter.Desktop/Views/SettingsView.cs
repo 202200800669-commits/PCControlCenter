@@ -1,150 +1,54 @@
 using System;
-using System.Diagnostics;
-using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
+using PCControlCenter.Desktop.Services;
 using PCControlCenter.Desktop.ViewModels;
 using static PCControlCenter.Desktop.Views.UIFactory;
-
 namespace PCControlCenter.Desktop.Views;
 
 public sealed class SettingsView : StackPanel
 {
-    private readonly MainViewModel vm;
-    private readonly TextBox logBox = new()
-    {
-        IsReadOnly = true,
-        TextWrapping = TextWrapping.Wrap,
-        VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-        Background = Brushes.Transparent,
-        Foreground = Brush("#66809B"),
-        BorderThickness = new Thickness(0),
-        FontFamily = new FontFamily("Consolas"),
-        FontSize = 12,
-        MinHeight = 160,
-        MaxHeight = 260
-    };
-    private readonly CheckBox trayCheck = new() { Content = "关闭主窗口时收起到系统托盘", IsChecked = true, Margin = new Thickness(0, 0, 0, 8) };
-    private readonly CheckBox autoStartCheck = new() { Content = "开机自动启动 (最小化到托盘)", Margin = new Thickness(0, 0, 0, 8) };
-    private readonly ComboBox intervalCombo = new() { ItemsSource = new[] { "2 秒", "3 秒", "5 秒", "10 秒" }, SelectedIndex = 1, MinHeight = 36 };
-
     public event Action? RequestExit;
-
     public SettingsView(MainViewModel vm)
     {
-        this.vm = vm;
-        Build();
-        vm.PropertyChanged += (s, e) =>
+        var choices = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+        foreach (var p in Appearance.Palettes)
         {
-            if (e.PropertyName == nameof(vm.LogText))
-            {
-                logBox.Text = vm.LogText;
-                logBox.ScrollToEnd();
-            }
-            else if (e.PropertyName == nameof(vm.AutoStart))
-            {
-                autoStartCheck.IsChecked = vm.AutoStart;
-            }
-        };
-    }
-
-    private void Build()
-    {
-        // Appearance & Preferences
-        var colorRow = Row();
-        foreach (var (name, color) in new[] { ("冰蓝", "#278FCD"), ("浅紫", "#8A74CF"), ("薄荷", "#35A6AE") })
-        {
-            var btn = new Button { Content = name, Margin = new Thickness(0, 0, 8, 8), Padding = new Thickness(16, 8, 16, 8) };
-            btn.Foreground = Brush(color);
-            btn.Click += (s, e) =>
-            {
-                vm.AccentColor = color;
-                if (Application.Current != null)
-                    Application.Current.Resources["Accent"] = Brush(color);
-                vm.AddLog($"主题色已切换为: {name} ({color})");
-            };
-            colorRow.Children.Add(btn);
+            var sample = new Border { Width = 112, Height = 66, CornerRadius = new CornerRadius(12), Background = new System.Windows.Media.LinearGradientBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(p.Background), (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(p.Accent), 35), Margin = new Thickness(0, 0, 0, 10), Child = new Border { Margin = new Thickness(12), CornerRadius = new CornerRadius(8), Background = Brush(p.Surface), BorderBrush = Brush(p.Line), BorderThickness = new Thickness(1) } };
+            var label = Text(p.Name, 12, "#173C58");
+            label.HorizontalAlignment = HorizontalAlignment.Center;
+            var button = new Button { Content = Stack(sample, label), Padding = new Thickness(10), Margin = new Thickness(0, 0, 12, 10), Tag = p.Id, ToolTip = p.Name + "主题" };
+            button.Click += (_, _) => Appearance.Apply(p.Id);
+            button.BorderThickness = new Thickness(2);
+            choices.Children.Add(button);
         }
-
-        trayCheck.IsChecked = vm.MinimizeToTray;
-        trayCheck.Checked += (s, e) => vm.MinimizeToTray = true;
-        trayCheck.Unchecked += (s, e) => vm.MinimizeToTray = false;
-
-        autoStartCheck.IsChecked = vm.AutoStart;
-        autoStartCheck.Checked += (s, e) => vm.AutoStart = true;
-        autoStartCheck.Unchecked += (s, e) => vm.AutoStart = false;
-
-        intervalCombo.SelectionChanged += (s, e) =>
+        void UpdateChoices()
         {
-            vm.PollIntervalSeconds = new[] { 2, 3, 5, 10 }[intervalCombo.SelectedIndex];
-            vm.AddLog($"采样刷新周期已设定为: {vm.PollIntervalSeconds} 秒");
-        };
-
-        var prefCard = Card(Stack(
-            Head("个性化与常规偏好"),
-            Text("主题重音色彩:", 12),
-            colorRow,
-            trayCheck,
-            autoStartCheck,
-            Text("后台遥测刷新间隔:", 12, "#315772"),
-            intervalCombo
-        ));
-
-        // Diagnostics Log Card
-        var logCard = Card(Stack(
-            Head("运行与受控审计日志"),
-            logBox
-        ));
-
-        // Actions Card
-        var actionsRow = Row(
-            CreateActionButton("程序目录", () => Process.Start(new ProcessStartInfo(AppContext.BaseDirectory) { UseShellExecute = true })),
-            CreateActionButton("复制 GitHub 反馈模板", async () =>
+            foreach (Button item in choices.Children)
             {
-                try
-                {
-                    var snap = await vm.GetFreshSnapshotAsync();
-                    var md = PCControlCenter.Core.Diagnostics.FormatGitHubIssueMarkdown(snap);
-                    Clipboard.SetText(md);
-                    vm.AddLog("已成功将 GitHub 适配反馈模板复制到剪贴板。");
-                    MessageBox.Show("已将 GitHub Issue 适配反馈模板复制到系统剪贴板！\n\n您可以直接在 GitHub 仓库新建 Issue 并粘贴该内容，帮助开发者快速完成对您机型的适配。", "复制成功");
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"生成反馈模板异常: {ex.Message}", "错误");
-                }
-            }),
-            CreateActionButton("导出脱敏反馈", async () =>
-            {
-                try
-                {
-                    var snap = await vm.GetFreshSnapshotAsync();
-                    var desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                    var zipPath = Path.Combine(desktopPath, $"pc-control-feedback-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
-                    PCControlCenter.Core.Diagnostics.Export(snap, zipPath);
-                    vm.AddLog($"已导出脱敏诊断包: {Path.GetFileName(zipPath)}");
-                    MessageBox.Show($"已成功生成并导出脱敏诊断包至桌面：\n{zipPath}\n\n该包不含序列号或个人敏感信息，可安全附于 GitHub 反馈中。", "导出成功");
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"导出诊断包失败: {ex.Message}", "错误");
-                }
-            }),
-            CreateActionButton("退出程序", () => RequestExit?.Invoke())
-        );
-
-        var actionCard = Card(Stack(Head("程序维护"), actionsRow));
-
-        Children.Add(prefCard);
-        Children.Add(logCard);
-        Children.Add(actionCard);
-    }
-
-    private Button CreateActionButton(string text, Action action)
-    {
-        var b = new Button { Content = text, Margin = new Thickness(0, 0, 8, 8), Padding = new Thickness(16, 8, 16, 8) };
-        b.Click += (s, e) => action();
-        return b;
+                bool selected = Equals(item.Tag, Appearance.Current.Id);
+                item.SetResourceReference(Control.BorderBrushProperty, selected ? "Accent" : "SurfaceLine");
+                System.Windows.Automation.AutomationProperties.SetItemStatus(item, selected ? "已选中" : "未选中");
+            }
+        }
+        Appearance.Changed += UpdateChoices;
+        UpdateChoices();
+        var motion = new CheckBox { Content = "流动光影", IsChecked = Appearance.Preferences.Motion };
+        motion.Checked += (_, _) => Appearance.SetMotion(true);
+        motion.Unchecked += (_, _) => Appearance.SetMotion(false);
+        Children.Add(Card(Stack(Head("主题"), choices, motion)));
+        var tray = new CheckBox { Content = "关闭时收起到托盘", IsChecked = vm.MinimizeToTray };
+        tray.Checked += (_, _) => { vm.MinimizeToTray = true; Appearance.Preferences.MinimizeToTray = true; Appearance.Save(); };
+        tray.Unchecked += (_, _) => { vm.MinimizeToTray = false; Appearance.Preferences.MinimizeToTray = false; Appearance.Save(); };
+        var startup = new CheckBox { Content = "开机启动", IsChecked = vm.AutoStart };
+        startup.Checked += (_, _) => { if (!Appearance.Preview) vm.AutoStart = true; };
+        startup.Unchecked += (_, _) => { if (!Appearance.Preview) vm.AutoStart = false; };
+        var interval = new ComboBox { ItemsSource = new[] { "2 秒", "3 秒", "5 秒", "10 秒" }, SelectedIndex = Array.IndexOf(new[] { 2, 3, 5, 10 }, vm.PollIntervalSeconds), MinWidth = 120 };
+        interval.SelectionChanged += (_, _) => { if (interval.SelectedIndex < 0) return; vm.PollIntervalSeconds = new[] { 2, 3, 5, 10 }[interval.SelectedIndex]; Appearance.Preferences.PollSeconds = vm.PollIntervalSeconds; Appearance.Save(); };
+        Children.Add(Card(Stack(Head("运行偏好"), Two(Stack(tray, startup), Stack(Text("状态刷新", 12), interval)))));
+        var logs = new TextBox { Text = vm.LogText, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, AcceptsReturn = true, Height = 210, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, FontSize = 12 };
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(vm.LogText)) logs.Text = vm.LogText; };
+        Children.Add(Card(new Expander { Header = "运行日志", Content = logs }));
+        Children.Add(Row(ActionButton("退出程序", () => RequestExit?.Invoke())));
     }
 }

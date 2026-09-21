@@ -1,6 +1,18 @@
 # 试点反馈流程
 
-用户先用 `probe` 查看，再用 `export feedback.zip` 导出；核对 diagnostics.json 后提交 GitHub Issue。需要权限的读取由 --elevated 明确触发，普通诊断不要求管理员。
+## 图形界面
+
+1. 打开左下角「测试与反馈」，选择反馈类型，填写问题和复现步骤。
+2. 点击「收集并预览」。检查设备型号、BIOS、描述以及可选的结构化操作记录。
+3. 点击「导出反馈包」保存 ZIP。导出内容与刚刚预览的内容一致；修改描述或选项后必须重新预览。
+4. 点击「打开提交页」，默认进入 [项目 Issues](https://github.com/202200800669-commits/PCControlCenter/issues)。设备信息和简短描述会填入新 Issue 表单。
+5. 登录 GitHub，将刚导出的 ZIP 拖到正文附件区，等待上传完成，再提交 Issue。软件不会代替用户自动上传文件，也不保存 GitHub 令牌。
+
+诊断包只含 `diagnostics.json`。操作记录只导出时间、功能类别和结果标签，不包含原始异常或命令行。用户自己填写的描述可能含个人信息，请在公开提交前检查。界面只收集普通权限可读取的诊断；不可读取的项目保持不可用，不要求用户为反馈开启硬件试验。
+
+## 命令行与维护者
+
+也可以用 `probe` 查看，再用 `export feedback.zip` 导出；核对 diagnostics.json 后提交 GitHub Issue。需要权限的读取由 --elevated 明确触发，普通诊断不要求管理员。
 
 维护者使用 `pc-control.exe inspect-report feedback.zip` 检查收到的文件。检查器限制 ZIP 和 JSON 大小、只接收 diagnostics.json、拒绝多余文件和重复字段，不解压文件，也不运行报告携带的任何内容。
 

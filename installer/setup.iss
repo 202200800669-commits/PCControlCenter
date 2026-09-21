@@ -2,9 +2,9 @@
 ; Supports non-elevated per-user installation (PrivilegesRequired=lowest)
 
 #define MyAppName "PC Control Center"
-#define MyAppVersion "0.1.0-alpha.13"
+#define MyAppVersion "0.1.0-alpha.14"
 #define MyAppPublisher "PC Control Center"
-#define MyAppURL "https://github.com/PCControlCenter/PCControlCenter"
+#define MyAppURL "https://github.com/202200800669-commits/PCControlCenter"
 #define MyAppExeName "pc-control-desktop.exe"
 
 [Setup]

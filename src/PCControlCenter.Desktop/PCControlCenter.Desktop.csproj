@@ -25,5 +25,6 @@
   <ItemGroup>
     <None Include="Theme.xaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Control.ico" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\FanMark.png" CopyToOutputDirectory="PreserveNewest" TargetPath="FanMark.png" />
   </ItemGroup>
 </Project>

@@ -92,6 +92,15 @@ public interface IBrokerExecutor
 
 public sealed class RealBrokerExecutor : IBrokerExecutor
 {
+    private readonly Func<string, SessionReceiptRecord?> readReceipt;
+    private readonly TimeSpan waitTimeout;
+
+    public RealBrokerExecutor(Func<string, SessionReceiptRecord?>? readReceipt = null, TimeSpan? waitTimeout = null)
+    {
+        this.readReceipt = readReceipt ?? (id => SessionReceiptStore.GetReceipt(id));
+        this.waitTimeout = waitTimeout ?? TimeSpan.FromSeconds(15);
+    }
+
     public async Task<BrokerResponse> ExecuteAsync(BrokerRequest request, CancellationToken ct)
     {
         BrokerSessionTracker.RecordStart(request.RequestId);
@@ -99,14 +108,10 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
         {
             var resp = await BrokerClient.ExecuteAsync(request, ct);
             var recovery = resp.Receipt?.Recovery ?? resp.ModeReceipt?.Recovery ?? resp.EnergyReceipt?.Recovery;
-            if (resp.Code == "OK" && recovery != "UNCONFIRMED")
-            {
-                BrokerSessionTracker.RecordState(request.RequestId, SessionState.RecoveryCompleted, recovery, resp.Code);
-            }
-            else
-            {
-                BrokerSessionTracker.RecordState(request.RequestId, SessionState.TerminatedUnconfirmed, recovery ?? "UNCONFIRMED", resp.Code);
-            }
+            var code = resp.Receipt?.Code ?? resp.ModeReceipt?.Code ?? resp.EnergyReceipt?.Code;
+            var state = resp.Code == "OK" && RecoveryOutcome.IsConfirmed(recovery, code)
+                ? SessionState.RecoveryCompleted : SessionState.TerminatedUnconfirmed;
+            BrokerSessionTracker.RecordState(request.RequestId, state, recovery ?? "UNCONFIRMED", code ?? resp.Code);
             return resp;
         }
         catch (OperationCanceledException)
@@ -116,142 +121,47 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
         }
         catch (Exception ex)
         {
-            BrokerSessionTracker.RecordState(request.RequestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", ex.Message);
+            // A disconnected client does not establish that the hardware worker has stopped.
+            BrokerSessionTracker.RecordState(request.RequestId, SessionState.Recovering, "UNCONFIRMED", ex.Message);
             throw;
         }
     }
 
     public async Task<SessionStatus> WaitForRecoveryAsync(string requestId, CancellationToken ct = default)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(waitTimeout);
         try
         {
-            for (int i = 0; i < 75; i++)
+            while (!deadline.IsCancellationRequested)
             {
-                if (ct.IsCancellationRequested)
-                    break;
-
-                // 1. 优先读取底层工作者写入的跨进程真实最终回执
-                var receipt = SessionReceiptStore.GetReceipt(requestId);
-                if (receipt != null)
+                var receipt = readReceipt(requestId);
+                if (receipt is not null && receipt.RequestId == requestId &&
+                    receipt.State is "Completed" or "TerminatedUnconfirmed")
                 {
-                    if (receipt.State == "Completed" && receipt.Recovery != "UNCONFIRMED")
-                    {
-                        var done = new SessionStatus(requestId, SessionState.RecoveryCompleted, receipt.Recovery, receipt.Code);
-                        BrokerSessionTracker.Update(done);
-                        return done;
-                    }
-                    if (receipt.State == "TerminatedUnconfirmed" || receipt.Recovery == "UNCONFIRMED")
-                    {
-                        var unconf = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", receipt.Message ?? receipt.Code);
-                        BrokerSessionTracker.Update(unconf);
-                        return unconf;
-                    }
+                    var confirmed = receipt.State == "Completed" && RecoveryOutcome.IsConfirmed(receipt.Recovery, receipt.Code);
+                    var state = confirmed ? SessionState.RecoveryCompleted : SessionState.TerminatedUnconfirmed;
+                    if (confirmed && receipt.Code == "CANCELLED_BEFORE_WRITE")
+                        state = SessionState.NotStarted;
+                    var terminal = new SessionStatus(requestId, state, receipt.Recovery ?? "UNCONFIRMED", receipt.Message ?? receipt.Code);
+                    BrokerSessionTracker.Update(terminal);
+                    return terminal;
                 }
-
-                var current = BrokerSessionTracker.GetStatus(requestId);
-                if (current.State is SessionState.RecoveryCompleted or SessionState.TerminatedUnconfirmed)
-                    return current;
-
-                // 2. 检查硬件互斥锁与遗弃状态
-                try
-                {
-                    using var m = Mutex.OpenExisting(@"Global\PCControlCenter.ThinkBookFanSession");
-                    bool acquired = false;
-                    try
-                    {
-                        acquired = m.WaitOne(0);
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        // 异常退出：工作进程崩溃或被终止导致互斥锁遗弃
-                        try
-                        {
-                            m.ReleaseMutex();
-                        }
-                        catch { }
-                        var term = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", "底层工作进程异常退出，控制锁被遗弃");
-                        BrokerSessionTracker.Update(term);
-                        return term;
-                    }
-
-                    if (acquired)
-                    {
-                        try
-                        {
-                            m.ReleaseMutex();
-                        }
-                        catch { }
-
-                        // 锁释放后再次检查是否有迟到的回执
-                        receipt = SessionReceiptStore.GetReceipt(requestId);
-                        if (receipt != null)
-                        {
-                            var state = (receipt.Recovery == "UNCONFIRMED") ? SessionState.TerminatedUnconfirmed : SessionState.RecoveryCompleted;
-                            var s = new SessionStatus(requestId, state, receipt.Recovery, receipt.Code);
-                            BrokerSessionTracker.Update(s);
-                            return s;
-                        }
-
-                        var currentTracked = BrokerSessionTracker.GetStatus(requestId);
-                        if (currentTracked.State == SessionState.NotStarted)
-                        {
-                            return new SessionStatus(requestId, SessionState.NotStarted, "NOT_NEEDED", "操作在创建底层锁前已取消");
-                        }
-
-                        // 锁已释放但未读取到底层回执：绝不捏造 NOT_NEEDED 或成功，明确返回未确认
-                        var noReceiptStatus = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "控制锁已释放但未读取到底层恢复回执");
-                        BrokerSessionTracker.Update(noReceiptStatus);
-                        return noReceiptStatus;
-                    }
-                    else
-                    {
-                        BrokerSessionTracker.RecordState(requestId, SessionState.Recovering);
-                    }
-                }
-                catch (WaitHandleCannotBeOpenedException)
-                {
-                    receipt = SessionReceiptStore.GetReceipt(requestId);
-                    if (receipt != null)
-                    {
-                        var state = (receipt.Recovery == "UNCONFIRMED") ? SessionState.TerminatedUnconfirmed : SessionState.RecoveryCompleted;
-                        var s = new SessionStatus(requestId, state, receipt.Recovery, receipt.Code);
-                        BrokerSessionTracker.Update(s);
-                        return s;
-                    }
-
-                    var sTracked = BrokerSessionTracker.GetStatus(requestId);
-                    if (sTracked.State == SessionState.NotStarted)
-                    {
-                        return new SessionStatus(requestId, SessionState.NotStarted, "NOT_NEEDED", "操作在创建底层锁前已取消");
-                    }
-                    if (sTracked.State is SessionState.Running or SessionState.Recovering)
-                    {
-                        var unconf = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", "底层锁缺失且未取得工作者回执");
-                        BrokerSessionTracker.Update(unconf);
-                        return unconf;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    var err = new SessionStatus(requestId, SessionState.TerminatedUnconfirmed, "UNCONFIRMED", ex.Message);
-                    BrokerSessionTracker.Update(err);
-                    return err;
-                }
-
-                await Task.Delay(200, ct);
+                // Missing/free/abandoned global locks say nothing about this request's final receipt.
+                // Keep polling so the worker can publish a result after releasing its hardware lock.
+                await Task.Delay(100, deadline.Token);
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            var err = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", ex.Message);
-            BrokerSessionTracker.Update(err);
-            return err;
+            var error = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", ex.Message);
+            BrokerSessionTracker.Update(error);
+            return error;
         }
-
-        var timeoutStatus = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "恢复等待超时");
-        BrokerSessionTracker.Update(timeoutStatus);
-        return timeoutStatus;
+        var timeout = new SessionStatus(requestId, SessionState.TimedOutUnconfirmed, "UNCONFIRMED", "恢复等待超时，仍可继续查询此请求的最终回执");
+        BrokerSessionTracker.Update(timeout);
+        return timeout;
     }
 
     public async Task<bool> WaitForRecoveryCompleteAsync(CancellationToken ct = default)

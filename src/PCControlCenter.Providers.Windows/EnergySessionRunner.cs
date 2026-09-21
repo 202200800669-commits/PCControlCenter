@@ -61,7 +61,6 @@ public static class EnergySessionRunner
             return new("WORKER_START_FAILED", request.Kind, request.Value, Recovery: "NOT_NEEDED");
         }
 
-        bool transferred = false;
         try
         {
             using var registration = stop.Register(() => { try { process.StandardInput.Close(); } catch { } });
@@ -81,10 +80,8 @@ public static class EnergySessionRunner
                 // 阶段 2：恢复执行阶段（脱离已取消的 stop 令牌，给予子进程充分等待时限）
                 if (await Task.WhenAny(exited, Task.Delay(RecoveryWaitTimeout)) != exited)
                 {
-                    // 超时但底层工作者仍在执行恢复，所有权真正移交给后台跟踪器，禁止调用方 Dispose
-                    RecoveryProcessTracker.Track(process, requestId, @"Global\PCControlCenter.ThinkBookEnergySession");
-                    transferred = true;
-                    return new("WORKER_TIMEOUT", request.Kind, request.Value, Recovery: "UNCONFIRMED");
+                    // Keep the one-shot Broker alive and retain stdout until the actual final receipt.
+                    await RecoveryProcessTracker.WaitForCompletionAsync(process, requestId);
                 }
             }
 
@@ -104,7 +101,7 @@ public static class EnergySessionRunner
         }
         finally
         {
-            if (!transferred && process != null)
+            if (process != null)
             {
                 try
                 {

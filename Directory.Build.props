@@ -1,5 +1,5 @@
 <Project><PropertyGroup>
  <TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
  <TreatWarningsAsErrors>true</TreatWarningsAsErrors><Deterministic>true</Deterministic>
- <Version>0.1.0-alpha.13</Version><Company>PCControlCenter</Company>
+ <Version>0.1.0-alpha.14</Version><Company>PCControlCenter</Company>
 </PropertyGroup></Project>

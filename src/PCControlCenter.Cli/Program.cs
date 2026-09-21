@@ -5,7 +5,7 @@ using PCControlCenter.Providers.Windows;
 Console.OutputEncoding = Encoding.UTF8;
 if (args.Length == 0 || args is ["--help"])
 {
-    Console.WriteLine("PC Control Center 0.1.0-alpha.13\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nfeedback-template [out.md]  生成 GitHub Issue 反馈模板（控制台输出或保存至 Markdown 文件）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\nmode <0|1|3>                        切换联想性能模式（0=均衡, 1=野兽, 3=安静）\nenergy <charge|key|night> <value>   设置能源/外设（charge: 0=普通/1=养护/2=快充; key: 0=关/1=低/2=高/3=自动; night: 0=关/1=开）\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");
+    Console.WriteLine("PC Control Center 0.1.0-alpha.14\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nfeedback-template [out.md]  生成 GitHub Issue 反馈模板（控制台输出或保存至 Markdown 文件）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\nmode <0|1|3>                        切换联想性能模式（0=均衡, 1=节能, 3=性能）\nenergy <charge|key|night> <value>   设置能源/外设（charge: 0=普通/1=养护/2=快充; key: 0=关/1=低/2=高/3=自动; night: 0=关/1=开）\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");
     return 0;
 }
 if (args is ["feedback-template"] || args is ["feedback-template", var destMd])
@@ -72,7 +72,7 @@ else if (args is ["fans", "manual", var one, var two, var duration2] && int.TryP
 ModeRequest? modeRequest = null;
 if (args is ["mode", var modeStr] && int.TryParse(modeStr, out var m) && m is 0 or 1 or 3)
     modeRequest = new(m);
-if (args is ["mode", _] && modeRequest is null) { Console.Error.WriteLine("参数无效：性能模式仅支持 0（均衡）、1（野兽/高性能）、3（安静/节能）。"); return 2; }
+if (args is ["mode", _] && modeRequest is null) { Console.Error.WriteLine("参数无效：性能模式仅支持 0（均衡）、1（安静/节能）、3（高性能）。"); return 2; }
 EnergyRequest? energyRequest = null;
 if (args is ["energy", var kindStr, var valStr] && int.TryParse(valStr, out var ev))
 {
@@ -109,7 +109,7 @@ try
             Console.Error.WriteLine("当前设备尚无经过验证的性能模式控制接口。");
             return 8;
         }
-        Console.Error.WriteLine($"即将请求管理员授权。将性能模式切换为 {modeRequest.Mode}（0=均衡, 1=野兽, 3=安静）并回读确认。");
+        Console.Error.WriteLine($"即将请求管理员授权。将性能模式切换为 {modeRequest.Mode}（0=均衡, 1=节能, 3=性能）并回读确认。");
         var response = await BrokerClient.ExecuteAsync(new(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "set-mode", device, Mode: modeRequest), cancellation.Token);
         Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(response, Diagnostics.Json));
         return response.Code == "OK" && response.ModeReceipt is { Code: "COMPLETED" } ? 0 : 9;

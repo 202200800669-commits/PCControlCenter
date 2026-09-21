@@ -1,147 +1,76 @@
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace PCControlCenter.Providers.Windows;
 
 public static class RecoveryProcessTracker
 {
+    private const string MarkerName = @"Global\PCControlCenter.InFlightRecovery";
     private static readonly object Gate = new();
+    private sealed record Entry(Process Process, TaskCompletionSource Completion);
+    private static readonly List<Entry> Entries = new();
+    private static Mutex? marker;
 
-    private sealed class TrackedItem
+    // Keep an independent OS process handle; the caller owns its original wrapper and output streams.
+    // The named object is a presence marker, never an owned/thread-affine mutex.
+    public static Task WaitForCompletionAsync(Process process, string requestId = "")
     {
-        public Process? Process
-        {
-            get; set;
-        }
-        public int Pid
-        {
-            get; init;
-        }
-        public string RequestId { get; init; } = "";
-        public string? MutexName
-        {
-            get; init;
-        }
-        public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
-
-    private static readonly List<TrackedItem> TrackedItems = new();
-    private static Mutex? inFlightGlobalMutex;
-
-    public static void Track(Process process, params string[] mutexNames) =>
-        Track(process, "", mutexNames.Length > 0 ? mutexNames[0] : null);
-
-    public static void Track(Process process, string requestId, string? mutexName = null)
-    {
-        int pid;
+        if (process.HasExited)
+            return Task.CompletedTask;
+        Process owned;
         try
         {
-            pid = process.Id;
+            owned = Process.GetProcessById(process.Id);
         }
-        catch
+        catch (ArgumentException) when (process.HasExited) { return Task.CompletedTask; }
+        try
         {
-            return;
+            _ = owned.SafeHandle;
         }
-
-        var item = new TrackedItem
-        {
-            Process = process,
-            Pid = pid,
-            RequestId = requestId,
-            MutexName = mutexName
-        };
-
+        catch when (process.HasExited) { owned.Dispose(); return Task.CompletedTask; }
+        var entry = new Entry(owned, new(TaskCreationOptions.RunContinuationsAsynchronously));
         lock (Gate)
-        {
-            TrackedItems.Add(item);
-            UpdateGlobalRecoveryMutex();
-        }
-
-        _ = Task.Run(async () =>
         {
             try
             {
-                try
-                {
-                    await process.WaitForExitAsync();
-                }
-                catch (Exception)
-                {
-                    // 应对外部对传入 process 实例意外调用 Dispose 的防御逻辑：回退至基于 PID 的存活探测
-                }
-
-                while (true)
-                {
-                    try
-                    {
-                        using var live = Process.GetProcessById(pid);
-                        if (live.HasExited)
-                            break;
-                    }
-                    catch (ArgumentException)
-                    {
-                        // 进程在操作系统中已不存在
-                        break;
-                    }
-                    catch
-                    {
-                        break;
-                    }
-                    await Task.Delay(100);
-                }
+                marker ??= new Mutex(false, MarkerName);
+                Entries.Add(entry);
             }
-            finally
-            {
-                lock (Gate)
-                {
-                    TrackedItems.Remove(item);
-                    UpdateGlobalRecoveryMutex();
-                }
-                item.Completion.TrySetResult(true);
-                try
-                {
-                    process.Dispose();
-                }
-                catch { }
-            }
-        });
+            catch { owned.Dispose(); throw; }
+        }
+        _ = ObserveAsync(entry);
+        return entry.Completion.Task;
     }
 
-    private static void UpdateGlobalRecoveryMutex()
+    private static async Task ObserveAsync(Entry entry)
     {
-        // 必须在 lock (Gate) 内部调用
-        if (TrackedItems.Count > 0)
+        Exception? failure = null;
+        try
         {
-            if (inFlightGlobalMutex == null)
-            {
-                try
-                {
-                    inFlightGlobalMutex = new Mutex(true, @"Global\PCControlCenter.InFlightRecovery", out _);
-                }
-                catch { }
-            }
+            await entry.Process.WaitForExitAsync().ConfigureAwait(false);
         }
+        catch (Exception ex) { failure = ex; }
+        finally
+        {
+            lock (Gate)
+            {
+                Entries.Remove(entry);
+                if (Entries.Count == 0)
+                {
+                    marker?.Dispose();
+                    marker = null;
+                }
+            }
+            entry.Process.Dispose();
+        }
+        if (failure is null)
+            entry.Completion.TrySetResult();
         else
-        {
-            if (inFlightGlobalMutex != null)
-            {
-                try
-                {
-                    inFlightGlobalMutex.ReleaseMutex();
-                }
-                catch { }
-                try
-                {
-                    inFlightGlobalMutex.Dispose();
-                }
-                catch { }
-                inFlightGlobalMutex = null;
-            }
-        }
+            entry.Completion.TrySetException(failure);
     }
+
+    public static void Track(Process process, params string[] mutexNames) => Track(process, "", null);
+    public static void Track(Process process, string requestId, string? mutexName = null) =>
+        _ = WaitForCompletionAsync(process, requestId);
 
     public static bool HasInFlightRecovery
     {
@@ -149,78 +78,36 @@ public static class RecoveryProcessTracker
         {
             lock (Gate)
             {
-                TrackedItems.RemoveAll(item =>
-                {
-                    try
-                    {
-                        if (item.Process != null && !item.Process.HasExited)
-                            return false;
-                    }
-                    catch { }
-
-                    try
-                    {
-                        using var live = Process.GetProcessById(item.Pid);
-                        return live.HasExited;
-                    }
-                    catch (ArgumentException)
-                    {
-                        return true;
-                    }
-                    catch
-                    {
-                        return true;
-                    }
-                });
-
-                UpdateGlobalRecoveryMutex();
-
-                if (TrackedItems.Count > 0)
+                if (Entries.Count > 0)
                     return true;
             }
-
-            // 跨进程探测全局恢复互斥锁：任何存活的 Broker 正在管理恢复时均能感知
             try
             {
-                if (Mutex.TryOpenExisting(@"Global\PCControlCenter.InFlightRecovery", out var extMutex))
+                if (Mutex.TryOpenExisting(MarkerName, out var existing))
                 {
-                    extMutex.Dispose();
+                    existing.Dispose();
                     return true;
                 }
             }
-            catch { }
-
+            catch (UnauthorizedAccessException) { return true; }
             return false;
         }
     }
 
     public static void ClearForTesting()
     {
+        Entry[] entries;
         lock (Gate)
+            entries = Entries.ToArray();
+        foreach (var entry in entries)
         {
-            foreach (var item in TrackedItems)
+            try
             {
-                try
-                {
-                    if (item.Process != null && !item.Process.HasExited)
-                        item.Process.Kill(true);
-                }
-                catch { }
-                try
-                {
-                    using var live = Process.GetProcessById(item.Pid);
-                    if (!live.HasExited)
-                        live.Kill(true);
-                }
-                catch { }
-                try
-                {
-                    item.Process?.Dispose();
-                }
-                catch { }
+                if (!entry.Process.HasExited)
+                    entry.Process.Kill(true);
             }
-            TrackedItems.Clear();
-            UpdateGlobalRecoveryMutex();
+            catch (InvalidOperationException) { }
         }
+        Task.WhenAll(entries.Select(x => x.Completion.Task)).GetAwaiter().GetResult();
     }
 }

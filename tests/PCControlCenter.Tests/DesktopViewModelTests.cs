@@ -294,8 +294,11 @@ static class DesktopViewModelTests
         unconfirmedTcs.SetResult(false);
         var unconfResult = await unconfTrialTask;
         check(!unconfResult.Success && unconfResult.Recovery == "UNCONFIRMED", "unconfirmed recovery reported");
-        check(!vm.IsBusy, "vm leaves busy state even if recovery timed out");
+        check(vm.IsBusy, "vm keeps controls locked while recovery is unconfirmed");
         check(vm.FanStateText == "恢复未确认", "fan state explicitly reports unconfirmed");
+        fakeBroker.RecoveryWaiter = ct => Task.FromResult(true);
+        await AwaitIdleAsync(vm);
+        check(!vm.IsBusy, "late recovery receipt releases the pending control lock");
 
         // 10. Real Coalescing Queue Tests in WindowsBrightnessService
         await RunBrightnessQueueTestsAsync(check);
@@ -373,12 +376,13 @@ static class DesktopViewModelTests
             escaped = true;
         }
         check(!escaped, "cancellation exception during recovery wait does not escape to UI caller");
-        check(!vm.IsBusy, "vm leaves busy state after recovery wait cancellation");
+        check(vm.IsBusy, "vm retains pending recovery after wait cancellation");
         check(vm.FanStateText == "恢复未确认", "fan state reports 恢复未确认 instead of leaving 取消中 (恢复中)");
 
         // 2. 状态映射场景 1: 取消发生在工作者创建锁之前 (SessionState.NotStarted, 零写入)
         fakeBroker.RecoveryStatusWaiter = (reqId, ct) =>
             Task.FromResult(new SessionStatus(reqId, SessionState.NotStarted, "NOT_NEEDED"));
+        await AwaitIdleAsync(vm);
         var notStartedRes = await vm.RunFanTrialAsync(3500, 3500, 10);
         check(!notStartedRes.Success, "not started cancellation returns Success=false");
         check(notStartedRes.Recovery == "NOT_NEEDED", "not started cancellation reports Recovery=NOT_NEEDED");
@@ -404,6 +408,18 @@ static class DesktopViewModelTests
         var timeoutRes = await vm.RunFanTrialAsync(3500, 3500, 10);
         check(!timeoutRes.Success, "timed out recovery returns Success=false");
         check(vm.FanStateText == "恢复未确认", "timed out recovery maps to 恢复未确认");
+        check(vm.IsBusy, "timed out recovery blocks conflicting writes until final receipt");
+        fakeBroker.RecoveryStatusWaiter = (reqId, ct) =>
+            Task.FromResult(new SessionStatus(reqId, SessionState.TerminatedUnconfirmed, "ROLLBACK_FAILED"));
+        await AwaitIdleAsync(vm);
+        check(vm.FanStateText == "恢复未确认", "late rollback failure never becomes recovery success");
+    }
+
+    private static async Task AwaitIdleAsync(MainViewModel vm)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (vm.IsBusy)
+            await Task.Delay(20, timeout.Token);
     }
 
     private static async Task RunRecoveryProcessTrackerTestsAsync(Action<bool, string> check)

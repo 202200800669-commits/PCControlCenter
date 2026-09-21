@@ -67,7 +67,7 @@ try
                         SessionReceiptStore.WriteReceipt(new SessionReceiptRecord(
                             request.RequestId,
                             request.Operation,
-                            receipt.Recovery == "UNCONFIRMED" ? "TerminatedUnconfirmed" : "Completed",
+                            RecoveryOutcome.TerminalState(receipt.Recovery, receipt.Code),
                             receipt.Recovery,
                             receipt.Code,
                             TimestampUtc: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
@@ -79,7 +79,7 @@ try
                         SessionReceiptStore.WriteReceipt(new SessionReceiptRecord(
                             request.RequestId,
                             request.Operation,
-                            receipt.Recovery == "UNCONFIRMED" ? "TerminatedUnconfirmed" : "Completed",
+                            RecoveryOutcome.TerminalState(receipt.Recovery, receipt.Code),
                             receipt.Recovery,
                             receipt.Code,
                             TimestampUtc: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
@@ -91,7 +91,7 @@ try
                         SessionReceiptStore.WriteReceipt(new SessionReceiptRecord(
                             request.RequestId,
                             request.Operation,
-                            receipt.Recovery == "UNCONFIRMED" ? "TerminatedUnconfirmed" : "Completed",
+                            RecoveryOutcome.TerminalState(receipt.Recovery, receipt.Code),
                             receipt.Recovery,
                             receipt.Code,
                             TimestampUtc: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));

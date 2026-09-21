@@ -10,9 +10,9 @@ namespace PCControlCenter.Desktop.Views;
 public sealed class ProfilesView : StackPanel
 {
     private readonly MainViewModel vm;
-    private readonly ComboBox profileList = new() { MinHeight = 36, Margin = new Thickness(0, 6, 0, 16) };
+    private readonly ComboBox profileList = new() { DisplayMemberPath = nameof(ProfileItem.Name), MinHeight = 36, Margin = new Thickness(0, 6, 0, 16) };
     private readonly TextBox profileNameBox = new() { Text = "自定义场景", Margin = new Thickness(0, 6, 0, 16) };
-    private readonly ComboBox modeCombo = new() { ItemsSource = new[] { "智能模式 (0)", "节能模式 (1)", "性能模式 (3)" }, SelectedIndex = 0, MinHeight = 36 };
+    private readonly ComboBox modeCombo = new() { ItemsSource = new[] { "智能", "节能", "性能" }, SelectedIndex = 0, MinHeight = 36 };
     private readonly Slider brightnessSlider = new() { Minimum = 10, Maximum = 100, Value = 80, TickFrequency = 5 };
 
     public ProfilesView(MainViewModel vm)
@@ -37,23 +37,24 @@ public sealed class ProfilesView : StackPanel
         };
 
         var scenarioCard = Card(Stack(
-            Head("场景预设库"),
-            Text("选择当前工作场景：", 12),
+            Head("我的场景"),
             profileList
         ));
 
-        var applyBtn = new Button { Content = "应用所选场景", Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 12, 8, 0) };
+        var applyBtn = new Button { Content = "应用", Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 12, 8, 0) };
         applyBtn.Click += async (s, e) =>
         {
-            if (vm.SelectedProfile is ProfileItem p)
+            if (!Services.Appearance.Preview && vm.SelectedProfile is ProfileItem p)
             {
                 await vm.ApplyProfileAsync(p);
             }
         };
 
-        var saveBtn = new Button { Content = "保存当前修改", Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 12, 0, 0) };
+        var saveBtn = new Button { Content = "保存", Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 12, 0, 0) };
         saveBtn.Click += async (s, e) =>
         {
+            if (Services.Appearance.Preview)
+                return;
             string name = profileNameBox.Text.Trim();
             if (string.IsNullOrEmpty(name))
                 return;
@@ -82,12 +83,12 @@ public sealed class ProfilesView : StackPanel
         };
 
         var editCard = Card(Stack(
-            Head("编辑与应用配置"),
-            Text("配置名称:", 12),
+            Head("场景配置"),
+            Text("名称", 12),
             profileNameBox,
             Two(
-                Stack(Text("关联性能模式:", 12), modeCombo),
-                Stack(Text("推荐屏幕亮度:", 12), brightnessSlider)
+                Stack(Text("性能模式", 12), modeCombo),
+                Stack(Text("屏幕亮度", 12), brightnessSlider)
             ),
             Row(applyBtn, saveBtn)
         ));

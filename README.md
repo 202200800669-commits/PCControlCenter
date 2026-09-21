@@ -1,122 +1,113 @@
-# PC Control Center (多品牌电脑控制中心)
+# PC Control Center · 电脑控制中心
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2011%20x64-0078D6.svg)](docs/compatibility.md)
-[![.NET](https://img.shields.io/badge/.NET-10.0%20LTS-512BD4.svg)](global.json)
-[![Tests](https://img.shields.io/badge/Tests-193%20Passed-success.svg)](tests/PCControlCenter.Tests)
+[![Build](https://github.com/202200800669-commits/PCControlCenter/actions/workflows/build.yml/badge.svg)](https://github.com/202200800669-commits/PCControlCenter/actions/workflows/build.yml)
+[![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
+[![Platform](https://img.shields.io/badge/Windows-x64-0078D6)](docs/compatibility.md)
 
-**PC Control Center** 是一款面向多品牌 Windows 笔记本电脑的现代化、轻量级、开源控制中心。项目旨在替代厂商臃肿的官方后台全家桶，提供普通权限桌面客户端、细粒度硬件状态监控、最小权限受控代理（Broker）与规范的社区适配框架。
+**因为我的 ThinkBook 缺少方便的手动风扇调节入口，我做了这个控制台。现在希望和更多用户一起，把它逐步做成适配多品牌电脑的控制中心。**
 
-> [!IMPORTANT]
-> **开源发布状态与安全原则**：
-> 1. **权限最小化**：桌面端与 CLI 默认以普通用户权限（`asInvoker`）运行，零常驻后台特权服务；仅在用户显式触发硬件控制时，通过一次性 Broker 请求 UAC 提权并在操作完成后自动退出。
-> 2. **未知型号零写入**：严格执行“适配单位是平台而非品牌”原则，未获社区或样机实测验证的设备一律关闭硬件写入，绝不盲目尝试。
-> 3. **脱敏与隐私底线**：严禁采集序列号（SN）、UUID、用户名、文件路径或网络标识；所有诊断与反馈数据全程透明可读。
+这是一个 Windows 桌面开源项目，提供设备监控、动态主题、场景配置与参考机型的受控硬件操作。欢迎联想、华硕、机械革命及其他品牌用户参与试用，提交型号信息、检测结果和使用问题，帮助完善适配。
 
----
+[下载试用版](https://github.com/202200800669-commits/PCControlCenter/releases) · [提交反馈](https://github.com/202200800669-commits/PCControlCenter/issues/new/choose) · [功能与兼容范围](docs/compatibility.md)
 
-## 💻 品牌与硬件支持矩阵
+> 当前为 **0.1.0-alpha.14 社区试点版**。多品牌框架已经建立，但不能据此理解为所有品牌都能调风扇。华硕、机械革命等设备目前主要用于品牌识别、只读检测和反馈采集；专用硬件写入仍按精确型号与 BIOS 白名单开放。
 
-| 品牌 / 模具 | 驱动与通信通道 | 当前项目状态 | 控制写入支持能力 |
-| :--- | :--- | :--- | :--- |
-| **联想 ThinkBook 16p G6 IAX**<br/>`(21R0 / R2CN57WW)` | 联想官方 ITS / ACPI 驱动 | ✅ **参考样机完整支持** | • 双风扇转速读取与限时试运行 (自动回滚)<br/>• 性能模式切换 (0 均衡 / 1 野兽 / 3 安静)<br/>• 电池养护模式 / 键盘背光调节 |
-| **华硕 ASUS / ROG / TUF** | ASUS System Control Interface v3<br/>(`root\wmi: AsusAtkWmi_WMNB`) | 🚀 **概念适配就绪**<br/>(待 GitHub 用户反馈) | • 识别 `asus.discovery`<br/>• 性能模式 (`0x00120075`)、充电上限 (`0x00120057`)、风扇 (`0x00110013`) 概念就绪<br/>• 硬件写入受控锁定，等待社区实测 |
-| **机械革命 MECHREVO**<br/>(同方 / Uniwill 模具) | 官方控制台驱动 / 服务架构<br/>(`UniwillService` / `GCU.sys`) | 🚀 **概念适配就绪**<br/>(待 GitHub 用户反馈) | • 识别 `mechrevo.discovery`<br/>• 模具 WMI 过滤探测与概念映射就绪<br/>• 硬件写入受控锁定，严禁无签名裸写 EC |
-| **通用 Windows PC**<br/>(任意品牌与台式机/笔记本) | Windows 标准 CIM / WMI API<br/>+ NVIDIA 官方遥测 | 🌐 **通用只读监控** | • 内存占用率、电池电量、屏幕亮度<br/>• **供电状态** (AC 适配器 / 电池放电)<br/>• **Windows 活动电源计划** (平衡/高性能等)<br/>• **NVIDIA 显卡遥测** (温度、负载、功耗) |
+## 界面预览
 
----
+![冰蓝主题与分组侧栏](docs/images/overview.png)
 
-## 🎨 UI/UX 与 Figma 设计插槽（设计余地保留）
+[观看 59 秒带字幕演示](https://github.com/202200800669-commits/PCControlCenter/releases/download/v0.1.0-alpha.14/PC-Control-Center-demo.mp4)（实际界面，只读演示，含配乐）。
 
-为了确保最终产品的视觉美感与极佳用户体验，**当前桌面客户端的通用组件、对话框、图标与高阶动效已充分预留设计余地，留空等待 Figma 原创设计稿交付**：
+五种主题：**冰蓝、浅紫、薄荷、高级黑、简约白**。三种彩色主题采用持续变色的流动光影背景，搭配半透明卡片；支持关闭动效。侧栏可以收起，主要功能与左下角的反馈、设置各自分组。
 
-* **前后端彻底解耦**：底层 `PCControlCenter.Core`、`PCControlCenter.Desktop.ViewModels` 与业务服务层已经过 100% 自动化测试覆盖，数据绑定与状态流转完备。
-* **插槽规范与交接指引**：详见 [`design/README.md`](design/README.md)。Figma 设计稿完成后，仅需在 `Views/` 注入矢量资源或 XAML 样式模板，即可无缝完成现代化视觉焕新，无需变动任何底层硬件代码。
+## 有哪些亮点
 
----
+- **把常用入口放在一起**：设备总览、性能与散热、设备与电源、场景配置、测试反馈、外观设置六个页面。
+- **查看真实状态**：CPU 负载、内存、电池与供电状态；支持的 NVIDIA 设备可读取温度、负载和功耗。不可用读数显示为未知，不用演示数字冒充实测。
+- **减少重复操作**：亮度和手动转速滑块在停止拖动后应用；硬件操作串行处理，试运行期间保留恢复自动入口。
+- **受控硬件操作**：桌面程序普通权限运行，需要时启动单次 UAC 代理。风扇手动控制为限时试运行，结束后发送恢复自动控制指令。
+- **为多机型反馈做准备**：收集设备型号、BIOS、系统与驱动信息、能力探测结果以及可选的结构化操作记录，先预览，再导出 ZIP，通过 GitHub Issues 提交。
+- **可继续扩展**：Core、Windows Providers、IPC/Broker 和 WPF 桌面界面分层，新的适配器可以按机型逐步加入。
 
-## 🚀 交付形态与安装指南
+## 功能列表
 
-针对不同用户与运维场景，提供三种互补的安装与交付方式：
+| 页面 | 已实现内容 | 适用条件 |
+| --- | --- | --- |
+| 设备总览 | 型号、CPU、内存、电池、GPU、负载趋势 | 读数取决于硬件、驱动和系统接口 |
+| 性能与散热 | 性能模式、双风扇读取、联动滑块、10–30 秒手动试运行、恢复自动 | 参考 ThinkBook 白名单；部分读取需要 UAC |
+| 设备与电源 | 屏幕亮度、充电模式、夜间慢充、键盘背光、系统设置快捷入口 | 亮度依赖 Windows 接口；厂商功能限已适配设备 |
+| 场景配置 | 保存与应用性能模式、亮度等配置 | 每一步执行与确认结果单独处理 |
+| 测试与反馈 | 本地采集、内容预览、ZIP 导出、预填 GitHub 提交页 | 所有可运行客户端的测试用户 |
+| 外观与设置 | 五主题、流动光影开关、刷新间隔、托盘、开机启动、运行日志 | Windows 桌面客户端 |
 
-### 1. 便携绿色版 (Portable ZIP)
-* 发布目录：`artifacts/pc-control-alpha-*.zip`
-* 特性：271 个自包含文件的单层平铺结构，解压即用，无需安装任何 .NET 运行时或环境依赖。
+## 当前适配范围
 
-### 2. Inno Setup 现代化安装包 (GUI 向导)
-* 安装脚本：[`installer/setup.iss`](installer/setup.iss)
-* 特性：符合开源标准的安装引导，请求最低权限（`PrivilegesRequired=lowest`），展示 GPL-3.0 许可协议，支持自定义安装路径并可选创建桌面与开始菜单快捷方式。
+| 品牌 / 设备 | 当前状态 |
+| --- | --- |
+| Lenovo ThinkBook 16p G6 IAX，产品 21R0，BIOS R2CN57WW | 参考机型；专用读取与实验性控制路径已实现。当前版本仍需要持续实机回归 |
+| ASUS / ROG / TUF | 品牌发现、通用监控与接口探测；专用写入尚未开放 |
+| MECHREVO / 机械革命 | 品牌发现、通用监控与接口探测；专用写入尚未开放 |
+| 其他 Windows PC | 通用监控；未匹配专用适配器的硬件写入关闭 |
 
-### 3. 单用户免提权脚本安装与卸载
-* 安装脚本：`pwsh scripts/install-peruser.ps1`
-  - 自动同步文件至 `%LocalAppData%\Programs\PCControlCenter`，建立快捷方式并在“Windows 设置 -> 已安装的应用”中注册标准卸载入口。
-* 干净卸载脚本：`pwsh scripts/uninstall-peruser.ps1`
-  - 自动终止运行进程、安全移除快捷方式与注册表卸载项，实现零垃圾残留。
+**同品牌、相似型号或相同代工厂不等于兼容。** 更新 BIOS 后也需要重新核对。现阶段没有通用风扇曲线编辑、裸写 EC、通用超频或降压功能。恢复路径有超时和进程退出保护，但不能保证系统崩溃、强制终止整个进程树等情况下恢复成功。更多说明见 [兼容记录](docs/compatibility.md) 和 [安全说明](SECURITY.md)。
 
-### 4. Authenticode 代码签名与验签工具链
-* 自动签名：[`scripts/sign-package.ps1`](scripts/sign-package.ps1)（支持探测 Windows 11 SDK `signtool.exe`，集成 DigiCert RFC 3161 时间戳服务，签名后自动重算哈希清单）。
-* 安全验签：[`scripts/verify-signatures.ps1`](scripts/verify-signatures.ps1)（核验发布包二进制数字签名状态）。
+## 下载与启动
 
----
+1. 从 [Releases](https://github.com/202200800669-commits/PCControlCenter/releases) 下载 Windows x64 ZIP。
+2. 解压到一个固定目录，运行 `pc-control-desktop.exe`。自包含版已附带 .NET 运行时。
+3. 首次先查看只读监控，再按自己的机型决定是否参与专用功能测试。
 
-## 📋 社区参与与 GitHub 适配反馈
+当前发布包没有 Authenticode 签名；可对照发布页 SHA-256 校验下载完整性。校验和不等于发布者身份认证。本项目不是任何电脑厂商的官方软件。
 
-我们热烈欢迎华硕、机械革命、联想及其他品牌电脑的用户参与适配！为了消除跨机型反馈门槛，我们提供了**一键 Issue 模板生成功能**：
+## 邀请不同品牌用户一起测试
 
-### 方式 A：桌面客户端一键复制
-1. 启动桌面端 `pc-control-desktop.exe`，进入“设置”页面。
-2. 在“程序维护”卡片中，点击 **“复制 GitHub 反馈模板”**。
-3. 系统将自动将完整的硬件环境、底层接口探查结果与传感器快照格式化为 Markdown 并写入剪贴板。
-4. 前往本仓库 [New Issue](https://github.com/issues) 页面，选择“新型号适配”并 `Ctrl+V` 粘贴即可。
+无论你的电脑来自联想、华硕、机械革命，还是其他品牌，都欢迎先做**只读试用**。即使某项读数不可用，也能帮助我们识别适配差异。
 
-### 方式 B：CLI 命令行导出
+建议反馈这些内容：
+
+1. 品牌、完整型号、BIOS、Windows 版本，以及正在使用的官方控制软件名称。
+2. CPU、GPU、内存、电池等显示是否正常；哪些内容缺失或显示异常。
+3. 主题、字体、窗口缩放、侧栏、托盘与场景配置的使用问题。
+4. 你最希望支持的功能。非白名单机型不要尝试绕过限制或修改硬件身份。
+5. 复现步骤、预期结果、实际结果，必要时附截图。
+
+### 从软件提交反馈
+
+1. 左下角打开 **测试与反馈**，选择类型并填写问题。
+2. 点击 **收集并预览**，检查将导出的内容。
+3. 点击 **导出反馈包**，保存 ZIP。
+4. 点击 **打开提交页**，会打开本仓库的新 Issue，并预填型号及简短问题描述。
+5. 在 GitHub 编辑区拖入刚导出的 ZIP，确认内容后提交。
+
+**软件不会自动上传日志，也不需要在软件中输入 GitHub Token。** GitHub 登录、附件上传和最终提交在浏览器中完成。自动记录仅导出时间、功能类别、结果标签，不导出原始异常、命令行或路径；问题描述由用户填写，发布前请自行检查个人信息。
+
+### CLI 与维护者工具
+
 ```powershell
-# 直接在终端输出格式化反馈 Markdown
-./pc-control.exe feedback-template
-
-# 或直接导出到文件
-./pc-control.exe feedback-template my-device.md
-
-# 导出脱敏诊断压缩包（用于深度故障排查）
-./pc-control.exe export feedback.zip
+.\pc-control.exe probe
+.\pc-control.exe export feedback.zip
+.\pc-control.exe inspect-report feedback.zip
+.\pc-control.exe feedback-template
 ```
 
-> [!NOTE]
-> 导出的数据仅包含硬件型号名称、BIOS 版本、系统构建号、接口探查名称及当前传感器读数，**绝无序列号与个人隐私**。
+`inspect-report` 只解析报告，限制 ZIP/JSON 大小并拒绝额外文件，不解压执行文件。用户反馈不会自动扩大硬件控制白名单。
 
----
+## 本地开发
 
-## 🛠️ 本地构建与开发者指南
+依赖 Windows x64 和 `global.json` 指定的 .NET SDK。仓库不包含个人电脑上的便携 SDK、已安装程序、真实诊断记录或视频原始帧。
 
-### 环境依赖
-* Windows 11 / Windows 10 (x64)
-* .NET 10.0 SDK（项目自带便携版位于 `local/dotnet10`）
-
-### 常用命令
 ```powershell
-# 编译全解决方案 (Debug / Release)
 dotnet build PCControlCenter.sln -c Release
-
-# 运行自动化测试套件 (193 项断言)
 dotnet run --project tests/PCControlCenter.Tests -c Release --no-build
-
-# 执行源代码安全边界检查 (验证零私钥、零敏感硬编码)
 pwsh scripts/verify-source.ps1
-
-# 代码空白与格式校验
 dotnet format whitespace PCControlCenter.sln --no-restore --verify-no-changes
-
-# 执行端到端构建、测试与平铺自包含打包
 pwsh scripts/package.ps1
-
-# 执行发布包 CLI 冒烟验证 (15 项指令检查)
-pwsh scripts/smoke-cli.ps1 -PackageDirectory artifacts/pc-control-alpha-*
 ```
 
----
+测试使用模拟探测器、受控子进程和隔离资源；通过自动测试不能代替跨机型硬件验证。持续集成会构建、测试、检查源代码边界并验证自包含包。
 
-## 📄 开源许可证与技术边界声明
+架构与贡献说明：[架构](docs/architecture.md) · [贡献指南](CONTRIBUTING.md) · [反馈流程](docs/feedback-workflow.md) · [第三方来源](THIRD_PARTY_NOTICES.md)
 
-* **开源许可证**：本项目采用 [GNU General Public License v3.0 or later (GPL-3.0-or-later)](LICENSE)。
-* **第三方来源与逆向工程边界**：详见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。本项目基于公开文档、上游 Linux 内核模块（如 `uniwill-laptop`）及合规开源参考（如 G-Helper）进行净室逆向与概念抽象，不包含任何厂商受版权保护的未授权专有二进制驱动。
-* **安全漏洞响应**：详见 [`SECURITY.md`](SECURITY.md)。
+## 开源许可
+
+[GPL-3.0-or-later](LICENSE)。欢迎提交 Issue、适配资料和 Pull Request。希望每一份反馈都能帮助下一款机型获得更可靠的支持。

@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 param(
     [string]$SourceDirectory
 )
@@ -85,14 +85,14 @@ if (-not (Test-Path -LiteralPath $uninstallKey)) {
 }
 $props = @{
     DisplayName         = 'PC Control Center'
-    DisplayVersion     = '0.1.0-alpha.13'
+    DisplayVersion     = '0.1.0-alpha.14'
     Publisher           = 'PC Control Center'
     DisplayIcon         = $iconPath
     InstallLocation     = $targetDir
     UninstallString     = "powershell.exe -ExecutionPolicy Bypass -File `"$uninstallTarget`""
     QuietUninstallString= "powershell.exe -ExecutionPolicy Bypass -File `"$uninstallTarget`" -Quiet"
-    HelpLink            = 'https://github.com/PCControlCenter/PCControlCenter'
-    URLInfoAbout        = 'https://github.com/PCControlCenter/PCControlCenter'
+    HelpLink            = 'https://github.com/202200800669-commits/PCControlCenter'
+    URLInfoAbout        = 'https://github.com/202200800669-commits/PCControlCenter'
     NoModify            = 1
     NoRepair            = 1
 }
