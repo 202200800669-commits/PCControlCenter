@@ -84,7 +84,9 @@ public sealed class DeviceView : StackPanel
                 _ => "背光状态待读取"
             };
         }
-        vm.PropertyChanged += (_, _) => Update();
+        ViewRefresh.Subscribe(this, vm, Update, nameof(vm.Brightness), nameof(vm.ConfirmedBrightness), nameof(vm.EnergyCharge),
+            nameof(vm.EnergyKey), nameof(vm.EnergyNight), nameof(vm.EnergyStatus), nameof(vm.BatteryText), nameof(vm.BatteryDetailText),
+            nameof(vm.IsBusy), nameof(vm.IsAuthorized), nameof(vm.HardwareTransition), nameof(vm.ManualFanActive), nameof(vm.DeviceTitle));
         Update();
     }
 }

@@ -77,7 +77,8 @@ public sealed class CoolingView : StackPanel
             first.IsEnabled = second.IsEnabled = linked.IsEnabled = authorized && vm.CanSwitchHardware;
             restore.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive || vm.HardwareTransition);
         }
-        vm.PropertyChanged += (_, _) => Update();
+        ViewRefresh.Subscribe(this, vm, Update, nameof(vm.FanText), nameof(vm.FanStateText), nameof(vm.PerformanceMode),
+            nameof(vm.IsBusy), nameof(vm.ManualFanActive), nameof(vm.IsAuthorized), nameof(vm.HardwareTransition), nameof(vm.DeviceTitle));
         Update();
     }
 }

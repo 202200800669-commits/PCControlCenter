@@ -43,7 +43,7 @@ public sealed class ProfilesView : StackPanel
 
         var applyBtn = new Button { Content = "应用", Padding = new Thickness(18, 9, 18, 9), Margin = new Thickness(0, 12, 8, 0) };
         void UpdatePermission() => applyBtn.IsEnabled = vm.IsAuthorized && vm.CanSwitchHardware && !Services.Appearance.Preview;
-        vm.PropertyChanged += (_, _) => UpdatePermission();
+        ViewRefresh.Subscribe(this, vm, UpdatePermission, nameof(vm.IsAuthorized), nameof(vm.IsBusy), nameof(vm.HardwareTransition), nameof(vm.ManualFanActive));
         UpdatePermission();
         applyBtn.Click += async (s, e) =>
         {

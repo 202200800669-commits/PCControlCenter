@@ -31,8 +31,12 @@ public sealed class OverviewView : StackPanel
     {
         this.vm = vm;
         Build();
-        vm.PropertyChanged += (s, e) => Update();
-        vm.GraphUpdated += DrawGraph;
+        ViewRefresh.Subscribe(this, vm, Update,
+            nameof(vm.DeviceTitle), nameof(vm.CpuName), nameof(vm.PerformanceMode), nameof(vm.CpuLoad), nameof(vm.CpuLoadText),
+            nameof(vm.GpuTempText), nameof(vm.GpuLoad), nameof(vm.GpuDetailText), nameof(vm.MemoryText), nameof(vm.MemoryLoad),
+            nameof(vm.BatteryText), nameof(vm.FanText), nameof(vm.FanStateText));
+        vm.GraphUpdated += () => { if (IsVisible) DrawGraph(); };
+        IsVisibleChanged += (_, _) => { if (IsVisible) DrawGraph(); };
         graph.SizeChanged += (s, e) => DrawGraph();
         Update();
     }
@@ -87,7 +91,8 @@ public sealed class OverviewView : StackPanel
         // Metrics Grid 2: Fans & Memory
         var readFansBtn = new Button { Content = "读取转速", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 8, 0, 0) };
         readFansBtn.IsEnabled = vm.IsThinkBookSupported && vm.IsAuthorized && !vm.IsBusy;
-        vm.PropertyChanged += (_, _) => readFansBtn.IsEnabled = vm.IsThinkBookSupported && vm.IsAuthorized && !vm.IsBusy;
+        ViewRefresh.Subscribe(this, vm, () => readFansBtn.IsEnabled = vm.IsThinkBookSupported && vm.IsAuthorized && !vm.IsBusy && !vm.HardwareTransition,
+            nameof(vm.IsBusy), nameof(vm.IsAuthorized), nameof(vm.HardwareTransition), nameof(vm.DeviceTitle));
         readFansBtn.Click += async (s, e) => await vm.ReadFansElevatedAsync();
 
         var fansCard = Card(Stack(

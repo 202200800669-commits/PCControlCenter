@@ -33,6 +33,7 @@ public sealed class MainWindow : Window
     private string selectedPage = "总览";
     private readonly bool preview;
     private bool stoppingForClose;
+    private bool initialized;
 
     public MainWindow(bool startMinimized = false, bool preview = false)
     {
@@ -85,9 +86,17 @@ public sealed class MainWindow : Window
             if (startMinimized)
                 Hide();
             await vm.InitializeAsync();
-            timer.Start();
+            initialized = true;
+            if (IsVisible && WindowState != WindowState.Minimized)
+                timer.Start();
         };
-        StateChanged += (_, _) => { if (!preview && WindowState == WindowState.Minimized && vm.MinimizeToTray) Hide(); };
+        StateChanged += (_, _) =>
+        {
+            if (!preview && WindowState == WindowState.Minimized && vm.MinimizeToTray)
+                Hide();
+            UpdatePolling();
+        };
+        IsVisibleChanged += (_, _) => UpdatePolling();
         Closing += async (_, e) =>
         {
             vm.CancelManualResume();
@@ -120,6 +129,21 @@ public sealed class MainWindow : Window
                 AuthorizedBrokerSession.Shutdown();
             }
         };
+    }
+    private void UpdatePolling()
+    {
+        if (preview || !initialized)
+            return;
+        if (IsVisible && WindowState != WindowState.Minimized)
+        {
+            if (!timer.IsEnabled)
+            {
+                timer.Start();
+                _ = vm.RefreshTelemetryAsync();
+            }
+        }
+        else
+            timer.Stop();
     }
     private void OnAuthorizationChanged()
     {

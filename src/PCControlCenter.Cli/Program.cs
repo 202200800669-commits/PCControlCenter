@@ -5,7 +5,7 @@ using PCControlCenter.Providers.Windows;
 Console.OutputEncoding = Encoding.UTF8;
 if (args.Length == 0 || args is ["--help"])
 {
-    Console.WriteLine("PC Control Center 0.1.0-alpha.16\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nfeedback-template [out.md]  生成 GitHub Issue 反馈模板（控制台输出或保存至 Markdown 文件）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\nmode <0|1|3>                        切换联想性能模式（0=均衡, 1=节能, 3=性能）\nenergy <charge|key|night> <value>   设置能源/外设（charge: 0=普通/1=养护/2=快充; key: 0=关/1=低/2=高/3=自动; night: 0=关/1=开）\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");
+    Console.WriteLine("PC Control Center 0.1.0-alpha.17\nprobe                       只读设备检测与诊断预览（加 --elevated 可请求风扇读取权限）\nexport <new-file.zip>        导出本地诊断包（不上传、不覆盖）\nfeedback-template [out.md]  生成 GitHub Issue 反馈模板（控制台输出或保存至 Markdown 文件）\nimport-preferences <old.json> <new.json>  导入非硬件偏好\nfans manual <rpm1> <rpm2> <seconds>  限时手动调速\nfans full <seconds>                 限时全速\nfans auto                           恢复自动\nmode <0|1|3>                        切换联想性能模式（0=均衡, 1=节能, 3=性能）\nenergy <charge|key|night> <value>   设置能源/外设（charge: 0=普通/1=养护/2=快充; key: 0=关/1=低/2=高/3=自动; night: 0=关/1=开）\ninspect-report <feedback.zip>         检查用户反馈包\nwatch <1-30>                        连续只读监控，Ctrl+C 结束");
     return 0;
 }
 if (args is ["feedback-template"] || args is ["feedback-template", var destMd])

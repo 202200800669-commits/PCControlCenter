@@ -10,6 +10,7 @@ namespace PCControlCenter.Desktop.Views;
 public sealed class SegmentedControl : Border
 {
     private readonly List<Button> buttons = new();
+    private int selectedIndex = int.MinValue;
     public event Action<int>? Invoked;
     public SegmentedControl(params string[] labels)
     {
@@ -32,6 +33,9 @@ public sealed class SegmentedControl : Border
     }
     public void Select(int index)
     {
+        if (selectedIndex == index)
+            return;
+        selectedIndex = index;
         for (int i = 0; i < buttons.Count; i++)
         {
             bool selected = i == index;

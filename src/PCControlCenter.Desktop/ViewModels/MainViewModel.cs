@@ -19,7 +19,9 @@ namespace PCControlCenter.Desktop.ViewModels;
 
 public sealed class MainViewModel : INotifyPropertyChanged
 {
-    private readonly WindowsProbe probe = new();
+    private readonly IReadOnlyProbe probe;
+    private readonly Func<CancellationToken, Task<DeviceControlReadings>> readControls;
+    private long controlRevision;
     private readonly IBrightnessService brightnessService;
     private readonly IProfileStorage profileStorage;
     private readonly IBrokerExecutor brokerExecutor;
@@ -213,6 +215,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         bool hadManual = ManualFanActive;
         var previousTarget = manualTarget;
         hardwareTransition = true;
+        controlRevision++;
         resumeManualAllowed = resumeManual && hadManual;
         Notify(nameof(HardwareTransition));
         bool canResume = false;
@@ -546,12 +549,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
     }
 
-    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor, IManualFanSession? manualFanSession = null)
+    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor, IManualFanSession? manualFanSession = null, IReadOnlyProbe? telemetryProbe = null, Func<CancellationToken, Task<DeviceControlReadings>>? readControls = null)
     {
         this.brightnessService = brightnessService;
         this.profileStorage = profileStorage;
         this.brokerExecutor = brokerExecutor;
         this.manualFanSession = manualFanSession ?? new ManualFanSession();
+        probe = telemetryProbe ?? new WindowsProbe();
+        this.readControls = readControls ?? DeviceControlReadings.ReadAsync;
         for (int i = 0; i < 60; i++)
         {
             CpuHistory.Enqueue(double.NaN);
@@ -648,7 +653,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         await LoadProfilesAsync(ct);
         try
         {
-            var initBright = await brightnessService.GetBrightnessAsync(ct);
+            var initBright = await Task.Run(() => brightnessService.GetBrightnessAsync(ct), ct);
             if (initBright.HasValue)
             {
                 Brightness = initBright.Value;
@@ -668,7 +673,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         try
         {
-            currentIdentity = await WindowsProbe.IdentifyAsync(probe, ct);
+            currentIdentity = await Task.Run(() => WindowsProbe.IdentifyAsync(probe, ct), ct);
             DeviceTitle = $"{currentIdentity.Model}";
             AddLog($"已识别设备: {currentIdentity.Manufacturer} {currentIdentity.Product} ({currentIdentity.Bios})");
         }
@@ -682,7 +687,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
             var provider = registry.Resolve(currentIdentity);
-            CurrentSnapshot = await provider.ReadAsync(currentIdentity, ct);
+            CurrentSnapshot = await Task.Run(() => provider.ReadAsync(currentIdentity, ct), ct);
+            CpuName = string.IsNullOrWhiteSpace(CurrentSnapshot.System?.CpuName) ? "处理器信息不可用" : CurrentSnapshot.System.CpuName;
         }
         catch { }
         await RefreshTelemetryAsync(ct);
@@ -696,7 +702,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
                 var provider = registry.Resolve(currentIdentity);
-                var fresh = await provider.ReadAsync(currentIdentity, ct);
+                var fresh = await Task.Run(() => provider.ReadAsync(currentIdentity, ct), ct);
                 CurrentSnapshot = fresh;
                 return fresh;
             }
@@ -747,6 +753,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         try
         {
+            // Process startup and driver calls must not block the dispatcher.
+            long sampledRevision = controlRevision;
+            bool controlsWereIdle = !hardwareTransition && !IsBusy;
+            var gpuTask = Task.Run(() => NvidiaTelemetry.ReadAsync(ct), ct);
+            var controlsTask = IsThinkBookSupported && controlsWereIdle
+                ? readControls(ct)
+                : Task.FromResult(new DeviceControlReadings(-1, -1, -1, -1));
             // 1. CPU & Memory & Battery
             double cpu = SystemMetrics.ReadCpuLoad();
             CpuLoad = cpu;
@@ -764,15 +777,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 lastBatteryDetailsRead = DateTime.UtcNow;
                 try
                 {
-                    var battery = await probe.QueryAsync(ProbeKind.BatteryCycles, ct);
-                    batteryCycles = battery.TryGetProperty("cycles", out var cycles) && cycles.TryGetInt32(out int count) && count >= 0 && count <= 100000 ? count : null;
+                    var battery = await Task.Run(() => probe.QueryAsync(ProbeKind.BatteryCycles, ct), ct);
+                    batteryCycles = battery.TryGetProperty("cycles", out var cycles) && cycles.ValueKind == JsonValueKind.Number && cycles.TryGetInt32(out int count) && count >= 0 && count <= 100000 ? count : null;
                 }
                 catch { batteryCycles = null; }
                 BatteryDetailText = SystemMetrics.ReadBatteryState() + (batteryCycles.HasValue ? $" · 循环 {batteryCycles} 次" : " · 循环次数未提供");
             }
 
             // 2. NVIDIA Telemetry
-            var gpuData = await NvidiaTelemetry.ReadAsync(ct);
+            var gpuData = await gpuTask;
             if (gpuData.Count > 0)
             {
                 var primary = gpuData[0];
@@ -809,37 +822,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
             }
 
             // 3. Performance Mode & Energy (Only on supported ThinkBook)
-            if (IsThinkBookSupported)
+            var controls = await controlsTask;
+            if (controlsWereIdle && sampledRevision == controlRevision && !hardwareTransition && !IsBusy)
             {
-                try
-                {
-                    var modeData = await probe.QueryAsync(ProbeKind.ThinkBookMode, ct);
-                    if (modeData.TryGetProperty("mode", out var m))
-                        PerformanceMode = m.GetInt32();
-                }
-                catch { }
-
-                int chg = EnergyReader.ReadCharge();
-                if (chg >= 0)
-                    EnergyCharge = chg;
-                int nht = EnergyReader.ReadNight();
-                if (nht >= 0)
-                    EnergyNight = nht;
-                int key = EnergyReader.ReadKeyboard();
-                if (key >= 0)
-                    EnergyKey = key;
-            }
-
-            if (currentIdentity != null)
-            {
-                try
-                {
-                    var registry = PCControlCenter.Providers.Windows.Providers.Create(probe);
-                    var provider = registry.Resolve(currentIdentity);
-                    CurrentSnapshot = await provider.ReadAsync(currentIdentity, ct);
-                    CpuName = string.IsNullOrWhiteSpace(CurrentSnapshot.System?.CpuName) ? "处理器信息不可用" : CurrentSnapshot.System.CpuName;
-                }
-                catch { }
+                if (controls.Mode >= 0)
+                    PerformanceMode = controls.Mode;
+                if (controls.Charge >= 0)
+                    EnergyCharge = controls.Charge;
+                if (controls.Night >= 0)
+                    EnergyNight = controls.Night;
+                if (controls.Keyboard >= 0)
+                    EnergyKey = controls.Keyboard;
             }
 
             GraphUpdated?.Invoke();
@@ -914,7 +907,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
         finally
         {
             IsBusy = false;
-            await RefreshTelemetryAsync();
         }
         return success;
     }
@@ -1055,7 +1047,6 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             EnergyStatus = StatusText;
             IsBusy = false;
-            await RefreshTelemetryAsync();
         }
         return success;
     }
