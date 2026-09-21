@@ -90,6 +90,7 @@ public sealed class MainWindow : Window
         StateChanged += (_, _) => { if (!preview && WindowState == WindowState.Minimized && vm.MinimizeToTray) Hide(); };
         Closing += async (_, e) =>
         {
+            vm.CancelManualResume();
             if (!preview && vm.ManualFanActive)
             {
                 e.Cancel = true;

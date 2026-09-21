@@ -23,6 +23,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly IBrightnessService brightnessService;
     private readonly IProfileStorage profileStorage;
     private readonly IBrokerExecutor brokerExecutor;
+    private readonly IManualFanSession manualFanSession;
     private DeviceIdentity? currentIdentity;
     private string deviceTitle = "正在识别设备";
     private string cpuName = "处理器加载中…";
@@ -35,6 +36,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string memoryText = "— / — GB";
     private double memoryLoad;
     private string batteryText = "—";
+    private string batteryDetailText = "充电状态待读取";
+    private DateTime lastBatteryDetailsRead = DateTime.MinValue;
+    private int? batteryCycles;
+    public string BatteryDetailText
+    {
+        get => batteryDetailText; private set
+        {
+            batteryDetailText = value;
+            Notify();
+        }
+    }
     private int brightness = 80;
     private int performanceMode = -1;
     private int? fan1Rpm;
@@ -67,6 +79,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private Task? manualFanTask;
     private (int First, int Second) manualTarget;
     private bool manualFanActive;
+    private bool manualRecoveryConfirmed;
+    private bool resumeManualAllowed;
+    private bool hardwareTransition;
+    public bool HardwareTransition => hardwareTransition;
+    public bool CanSwitchHardware => !hardwareTransition && (!IsBusy || ManualFanActive);
     public bool ManualFanActive
     {
         get => manualFanActive; private set
@@ -75,7 +92,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Notify();
         }
     }
-    public bool IsAuthorized => AuthorizedBrokerSession.IsAuthorized;
+    public bool IsAuthorized => manualFanSession.IsAuthorized;
     private bool authorizationPending;
     public bool AuthorizationPending
     {
@@ -124,7 +141,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
     public Task SetManualFanTargetAsync(int first, int second)
     {
-        if (!new FanTrial("manual", first, second, 5).IsValid || !IsThinkBookSupported || !IsAuthorized)
+        if (hardwareTransition || !new FanTrial("manual", first, second, 5).IsValid || !IsThinkBookSupported || !IsAuthorized)
             return Task.CompletedTask;
         if (ManualFanActive)
         {
@@ -135,6 +152,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return Task.CompletedTask;
         manualTarget = (first, second);
         manualFanCts = new CancellationTokenSource();
+        manualRecoveryConfirmed = false;
         ManualFanActive = true;
         IsBusy = true;
         FanStateText = "正在开启手动控制…";
@@ -146,14 +164,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         try
         {
-            var response = await AuthorizedBrokerSession.RunFanControlAsync(request, () => manualTarget, state =>
+            var response = await manualFanSession.RunAsync(request, () => manualTarget, state =>
             {
                 Fan1Rpm = state.Fan1;
                 Fan2Rpm = state.Fan2;
                 FanText = $"{state.Fan1?.ToString() ?? "—"} / {state.Fan2?.ToString() ?? "—"} RPM";
                 FanStateText = $"持续手动 · 目标 {manualTarget.First} / {manualTarget.Second} RPM";
             }, ct);
-            FanStateText = response.Receipt?.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF" ? "自动控制指令已发送" : "手动控制已结束 · 恢复未确认";
+            manualRecoveryConfirmed = response.Receipt?.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF";
+            FanStateText = manualRecoveryConfirmed ? "自动控制指令已发送" : "手动控制已结束 · 恢复未确认";
             StatusText = FanStateText;
             AddLog($"风扇持续控制结束: {response.Receipt?.Code ?? response.Code}, {response.Receipt?.Recovery ?? "UNCONFIRMED"}");
         }
@@ -162,7 +181,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             FanStateText = "连接已中断，正在恢复自动…";
             AddLog("风扇持续控制异常: " + ex.Message);
             var state = await brokerExecutor.WaitForRecoveryAsync(request.RequestId);
-            FanStateText = state.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF" ? "自动控制指令已发送" : "恢复未确认，请检查风扇状态";
+            manualRecoveryConfirmed = state.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF";
+            FanStateText = manualRecoveryConfirmed ? "自动控制指令已发送" : "恢复未确认，请检查风扇状态";
         }
         finally
         {
@@ -173,14 +193,52 @@ public sealed class MainViewModel : INotifyPropertyChanged
             lastErrorTimestamp = DateTime.UtcNow;
         }
     }
-    public async Task StopManualFanAsync()
+    public void CancelManualResume() => resumeManualAllowed = false;
+    public async Task StopManualFanAsync(bool cancelResume = true)
     {
+        if (cancelResume)
+            resumeManualAllowed = false;
         if (!ManualFanActive)
             return;
         manualFanCts?.Cancel();
         FanStateText = "正在恢复自动…";
         if (manualFanTask is not null)
             await manualFanTask;
+    }
+
+    private async Task<bool> WithManualHandoffAsync(Func<Task<bool>> operation, bool resumeManual)
+    {
+        if (!CanSwitchHardware)
+            return false;
+        bool hadManual = ManualFanActive;
+        var previousTarget = manualTarget;
+        hardwareTransition = true;
+        resumeManualAllowed = resumeManual && hadManual;
+        Notify(nameof(HardwareTransition));
+        bool canResume = false;
+        try
+        {
+            if (hadManual)
+            {
+                await StopManualFanAsync(cancelResume: false);
+                if (!manualRecoveryConfirmed)
+                {
+                    EnergyStatus = StatusText = "风扇恢复未确认，本次切换已停止";
+                    return false;
+                }
+            }
+            bool success = await operation();
+            canResume = success;
+            return success;
+        }
+        finally
+        {
+            hardwareTransition = false;
+            if (canResume && resumeManualAllowed && IsAuthorized && !IsBusy)
+                await SetManualFanTargetAsync(previousTarget.First, previousTarget.Second);
+            resumeManualAllowed = false;
+            Notify(nameof(HardwareTransition));
+        }
     }
 
     public bool IsThinkBookSupported => currentIdentity is not null && new ThinkBookProvider(probe).Matches(currentIdentity);
@@ -488,11 +546,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
     }
 
-    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor)
+    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor, IManualFanSession? manualFanSession = null)
     {
         this.brightnessService = brightnessService;
         this.profileStorage = profileStorage;
         this.brokerExecutor = brokerExecutor;
+        this.manualFanSession = manualFanSession ?? new ManualFanSession();
         for (int i = 0; i < 60; i++)
         {
             CpuHistory.Enqueue(double.NaN);
@@ -699,6 +758,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
             MemoryLoad = memPct;
             MemoryText = totalMem > 0 ? $"{usedMem:F1} / {totalMem:F0} GB" : "—";
             BatteryText = SystemMetrics.ReadBattery();
+            BatteryDetailText = SystemMetrics.ReadBatteryState() + (batteryCycles.HasValue ? $" · 循环 {batteryCycles} 次" : " · 循环次数未提供");
+            if (DateTime.UtcNow - lastBatteryDetailsRead > TimeSpan.FromMinutes(1))
+            {
+                lastBatteryDetailsRead = DateTime.UtcNow;
+                try
+                {
+                    var battery = await probe.QueryAsync(ProbeKind.BatteryCycles, ct);
+                    batteryCycles = battery.TryGetProperty("cycles", out var cycles) && cycles.TryGetInt32(out int count) && count >= 0 && count <= 100000 ? count : null;
+                }
+                catch { batteryCycles = null; }
+                BatteryDetailText = SystemMetrics.ReadBatteryState() + (batteryCycles.HasValue ? $" · 循环 {batteryCycles} 次" : " · 循环次数未提供");
+            }
 
             // 2. NVIDIA Telemetry
             var gpuData = await NvidiaTelemetry.ReadAsync(ct);
@@ -787,7 +858,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
     }
 
-    public async Task<bool> SetPerformanceModeAsync(int targetMode)
+    public Task<bool> SetPerformanceModeAsync(int targetMode)
+    {
+        if (!new ModeRequest(targetMode).IsValid || currentIdentity is null)
+            return Task.FromResult(false);
+        return WithManualHandoffAsync(() => SetPerformanceModeCoreAsync(targetMode), resumeManual: false);
+    }
+
+    private async Task<bool> SetPerformanceModeCoreAsync(int targetMode)
     {
         if (IsBusy || currentIdentity is null)
             return false;
@@ -898,7 +976,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task SetEnergyAsync(string kind, int targetValue)
     {
-        if (IsBusy || !IsThinkBookSupported || currentIdentity is null || !new EnergyRequest(kind, targetValue).IsValid)
+        if (!IsThinkBookSupported || currentIdentity is null || !new EnergyRequest(kind, targetValue).IsValid)
             return;
         int current = kind == "charge" ? EnergyCharge : kind == "key" ? EnergyKey : EnergyNight;
         if (current == targetValue)
@@ -906,6 +984,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
             EnergyStatus = "已是当前设置";
             return;
         }
+        await WithManualHandoffAsync(() => SetEnergyCoreAsync(kind, targetValue), resumeManual: true);
+    }
+
+    private async Task<bool> SetEnergyCoreAsync(string kind, int targetValue)
+    {
+        if (IsBusy || !IsThinkBookSupported || currentIdentity is null || !new EnergyRequest(kind, targetValue).IsValid)
+            return false;
+        int current = kind == "charge" ? EnergyCharge : kind == "key" ? EnergyKey : EnergyNight;
+        if (current == targetValue)
+        {
+            EnergyStatus = "已是当前设置";
+            return true;
+        }
+        bool success = false;
         IsBusy = true;
         EnergyStatus = "正在应用…";
         StatusText = $"正在请求配置 {kind} = {targetValue}…";
@@ -918,6 +1010,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             {
                 if (er.Code == "COMPLETED")
                 {
+                    success = true;
                     int finalVal = er.FinalValue ?? er.TargetValue;
                     if (kind == "charge")
                         EnergyCharge = finalVal;
@@ -964,6 +1057,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             IsBusy = false;
             await RefreshTelemetryAsync();
         }
+        return success;
     }
 
     public async Task ReadFansElevatedAsync()
@@ -1007,6 +1101,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task<FanOperationResult> RestoreFanAutoAsync()
     {
+        resumeManualAllowed = false;
+        if (HardwareTransition && !ManualFanActive)
+            return new FanOperationResult(false, "切换完成后保持自动散热");
         if (ManualFanActive)
         {
             await StopManualFanAsync();

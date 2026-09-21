@@ -78,13 +78,43 @@ public static class SystemMetrics
         try
         {
             var p = Forms.SystemInformation.PowerStatus;
+            if (p.BatteryChargeStatus != Forms.BatteryChargeStatus.Unknown && p.BatteryChargeStatus.HasFlag(Forms.BatteryChargeStatus.NoSystemBattery))
+                return "未检测到电池";
             string percent = p.BatteryLifePercent >= 0 && p.BatteryLifePercent <= 1 ? p.BatteryLifePercent.ToString("P0", CultureInfo.InvariantCulture) : "—";
-            string line = p.PowerLineStatus == Forms.PowerLineStatus.Online ? "外接电源" : "电池供电";
+            string line = p.PowerLineStatus switch
+            {
+                Forms.PowerLineStatus.Online => "外接电源",
+                Forms.PowerLineStatus.Offline => "电池供电",
+                _ => "供电状态未知"
+            };
             return $"电池 {percent}  ·  {line}";
         }
         catch
         {
             return "电池状态暂不可用";
         }
+    }
+
+    public static string DescribeBatteryState(Forms.BatteryChargeStatus status, Forms.PowerLineStatus power, float percent)
+    {
+        if (status == Forms.BatteryChargeStatus.Unknown)
+            return "充电状态未知";
+        if (status.HasFlag(Forms.BatteryChargeStatus.NoSystemBattery))
+            return "未检测到电池";
+        if (status.HasFlag(Forms.BatteryChargeStatus.Charging))
+            return "正在充电";
+        if (power == Forms.PowerLineStatus.Online)
+            return percent >= 0.995f && percent <= 1 ? "已充满" : "已接电 · 未充电";
+        return power == Forms.PowerLineStatus.Offline ? "正在使用电池" : "充电状态未知";
+    }
+
+    public static string ReadBatteryState()
+    {
+        try
+        {
+            var p = Forms.SystemInformation.PowerStatus;
+            return DescribeBatteryState(p.BatteryChargeStatus, p.PowerLineStatus, p.BatteryLifePercent);
+        }
+        catch { return "充电状态未知"; }
     }
 }

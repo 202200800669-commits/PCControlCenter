@@ -430,6 +430,7 @@ await ModeWorkerTests.RunAllAsync(Check);
 await EnergyWorkerTests.RunAllAsync(Check);
 await LiveControlTests.RunAsync(Check, device);
 await DesktopViewModelTests.RunAllAsync(Check);
+await HardwareHandoffTests.RunAsync(Check);
 DesktopFeedbackTests.Run(Check, snap);
 await BrightnessScriptTests.RunAllAsync(Check);
 FanStatusMapperTests.RunAll(Check);

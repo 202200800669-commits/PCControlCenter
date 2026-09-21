@@ -14,7 +14,7 @@ public sealed class ProbeException(string code) : IOException(code)
 }
 public enum ProbeKind
 {
-    Identity, Generic, ThinkBookFans, ThinkBookMode
+    Identity, Generic, ThinkBookFans, ThinkBookMode, BatteryCycles
 }
 public interface IReadOnlyProbe
 {
@@ -90,6 +90,14 @@ public sealed class WindowsProbe : IReadOnlyProbe
             ProbeKind.Generic => GenericScript,
             ProbeKind.ThinkBookFans => FanScript,
             ProbeKind.ThinkBookMode => ModeScript,
+            ProbeKind.BatteryCycles => """
+                $cycles=$null
+                try {
+                    $items=@(Get-CimInstance -Namespace root/wmi -ClassName BatteryCycleCount -OperationTimeoutSec 3 -ErrorAction Stop | Where-Object Active)
+                    if($items.Count -eq 1 -and $null -ne $items[0].CycleCount -and $items[0].CycleCount -le 100000){$cycles=[int]$items[0].CycleCount}
+                } catch {}
+                @{cycles=$cycles}|ConvertTo-Json -Compress
+                """,
             _ => throw new ArgumentOutOfRangeException(nameof(kind))
         };
         var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\WindowsPowerShell\v1.0\powershell.exe");

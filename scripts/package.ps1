@@ -32,7 +32,7 @@ try {
  $dirty=[bool](git status --porcelain)
  [ordered]@{schemaVersion=1;sourceCommit=$commit;sourceDirty=$dirty;sdk=$sdk.sdk.version;runtime=$runtimeVersion;rid='win-x64';selfContained=$true;builtAtUtc=[DateTime]::UtcNow.ToString('O')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $bundle 'BUILD.json') -Encoding utf8
  $usage=@'
-PC Control Center 0.1.0-alpha.15
+PC Control Center 0.1.0-alpha.16
 Windows x64. .NET 10 runtime is included; no separate runtime installation required.
 Double-click pc-control-desktop.exe for graphical control center (non-elevated).
 Double-click probe.cmd for read-only detection.

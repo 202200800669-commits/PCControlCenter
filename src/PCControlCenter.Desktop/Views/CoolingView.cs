@@ -25,7 +25,7 @@ public sealed class CoolingView : StackPanel
         this.vm = vm;
         var modeLabel = Text(vm.PerformanceModeName, 12);
         modes.Invoked += async index => { if (!Appearance.Preview) await vm.SetPerformanceModeAsync(new[] { 0, 1, 3 }[index]); };
-        Children.Add(Card(Stack(Head("性能模式"), modes, modeLabel)));
+        Children.Add(Card(Stack(Head("性能模式"), modes, modeLabel, Text("切换性能模式后恢复自动散热", 12))));
         var refresh = ActionButton("读取转速", async () => { if (!Appearance.Preview) await vm.ReadFansElevatedAsync(); });
         var restore = ActionButton("恢复自动", async () => { commit.Stop(); if (!Appearance.Preview) await vm.RestoreFanAutoAsync(); });
         Children.Add(Card(Stack(Head("散热状态"), Two(Stack(fans, state), Row(refresh, restore)))));
@@ -72,9 +72,10 @@ public sealed class CoolingView : StackPanel
             modeLabel.Text = vm.PerformanceModeName;
             modes.Select(vm.PerformanceMode == 0 ? 0 : vm.PerformanceMode == 1 ? 1 : vm.PerformanceMode == 3 ? 2 : -1);
             bool authorized = vm.IsThinkBookSupported && vm.IsAuthorized && !Appearance.Preview;
-            modes.IsEnabled = refresh.IsEnabled = authorized && !vm.IsBusy;
-            first.IsEnabled = second.IsEnabled = linked.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive);
-            restore.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive);
+            modes.IsEnabled = authorized && vm.CanSwitchHardware;
+            refresh.IsEnabled = authorized && !vm.IsBusy && !vm.HardwareTransition;
+            first.IsEnabled = second.IsEnabled = linked.IsEnabled = authorized && vm.CanSwitchHardware;
+            restore.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive || vm.HardwareTransition);
         }
         vm.PropertyChanged += (_, _) => Update();
         Update();
