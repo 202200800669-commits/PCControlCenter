@@ -5,7 +5,7 @@ using PCControlCenter.Providers.Windows;
 
 static class FanWorkerTests
 {
-    private const string MockHardware = """
+    internal const string MockHardware = """
  $script:writes=New-Object Collections.Generic.List[object]
  $script:values=@{[uint32]0x04020000=0;[uint32]0x04030001=2500;[uint32]0x04030002=2300}
  function Get-CimInstance {

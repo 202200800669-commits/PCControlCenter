@@ -44,6 +44,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private int energyCharge = -1;
     private int energyNight = -1;
     private int energyKey = -1;
+    private string energyStatus = "";
+    public string EnergyStatus
+    {
+        get => energyStatus; private set
+        {
+            energyStatus = value;
+            Notify();
+        }
+    }
     private string statusText = "就绪";
     private string logText = "";
     private bool isBusy;
@@ -54,6 +63,125 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private CancellationTokenSource? activeFanTrialCts;
     private DateTime lastErrorTimestamp = DateTime.MinValue;
     private readonly SemaphoreSlim refreshGate = new(1, 1);
+    private CancellationTokenSource? manualFanCts;
+    private Task? manualFanTask;
+    private (int First, int Second) manualTarget;
+    private bool manualFanActive;
+    public bool ManualFanActive
+    {
+        get => manualFanActive; private set
+        {
+            manualFanActive = value;
+            Notify();
+        }
+    }
+    public bool IsAuthorized => AuthorizedBrokerSession.IsAuthorized;
+    private bool authorizationPending;
+    public bool AuthorizationPending
+    {
+        get => authorizationPending; private set
+        {
+            authorizationPending = value;
+            Notify();
+        }
+    }
+    private string authorizationText = "未授权，部分功能不可用";
+    public string AuthorizationText
+    {
+        get => authorizationText; private set
+        {
+            authorizationText = value;
+            Notify();
+        }
+    }
+    public void NotifyAuthorization()
+    {
+        AuthorizationText = IsAuthorized ? "已授权" : "未授权，部分功能不可用";
+        Notify(nameof(IsAuthorized));
+    }
+    public async Task AuthorizeAsync()
+    {
+        if (AuthorizationPending || IsAuthorized || currentIdentity is null)
+            return;
+        if (!IsThinkBookSupported)
+        {
+            AuthorizationText = "当前机型仅支持普通监控";
+            return;
+        }
+        AuthorizationPending = true;
+        AuthorizationText = "等待系统授权…";
+        try
+        {
+            await AuthorizedBrokerSession.AuthorizeAsync(currentIdentity);
+            NotifyAuthorization();
+        }
+        catch (Exception ex)
+        {
+            AuthorizationText = ex.Message == "ELEVATION_CANCELLED" ? "未授权，部分功能不可用" : "授权连接失败，可在设置中重试";
+            AddLog("授权失败: " + ex.Message);
+        }
+        finally { AuthorizationPending = false; }
+    }
+    public Task SetManualFanTargetAsync(int first, int second)
+    {
+        if (!new FanTrial("manual", first, second, 5).IsValid || !IsThinkBookSupported || !IsAuthorized)
+            return Task.CompletedTask;
+        if (ManualFanActive)
+        {
+            manualTarget = (first, second);
+            return Task.CompletedTask;
+        }
+        if (IsBusy || currentIdentity is null)
+            return Task.CompletedTask;
+        manualTarget = (first, second);
+        manualFanCts = new CancellationTokenSource();
+        ManualFanActive = true;
+        IsBusy = true;
+        FanStateText = "正在开启手动控制…";
+        var request = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "fan-control", currentIdentity, new FanTrial("manual", first, second, 5));
+        manualFanTask = RunManualFanAsync(request, manualFanCts.Token);
+        return Task.CompletedTask;
+    }
+    private async Task RunManualFanAsync(BrokerRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var response = await AuthorizedBrokerSession.RunFanControlAsync(request, () => manualTarget, state =>
+            {
+                Fan1Rpm = state.Fan1;
+                Fan2Rpm = state.Fan2;
+                FanText = $"{state.Fan1?.ToString() ?? "—"} / {state.Fan2?.ToString() ?? "—"} RPM";
+                FanStateText = $"持续手动 · 目标 {manualTarget.First} / {manualTarget.Second} RPM";
+            }, ct);
+            FanStateText = response.Receipt?.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF" ? "自动控制指令已发送" : "手动控制已结束 · 恢复未确认";
+            StatusText = FanStateText;
+            AddLog($"风扇持续控制结束: {response.Receipt?.Code ?? response.Code}, {response.Receipt?.Recovery ?? "UNCONFIRMED"}");
+        }
+        catch (Exception ex)
+        {
+            FanStateText = "连接已中断，正在恢复自动…";
+            AddLog("风扇持续控制异常: " + ex.Message);
+            var state = await brokerExecutor.WaitForRecoveryAsync(request.RequestId);
+            FanStateText = state.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF" ? "自动控制指令已发送" : "恢复未确认，请检查风扇状态";
+        }
+        finally
+        {
+            manualFanCts?.Dispose();
+            manualFanCts = null;
+            ManualFanActive = false;
+            IsBusy = false;
+            lastErrorTimestamp = DateTime.UtcNow;
+        }
+    }
+    public async Task StopManualFanAsync()
+    {
+        if (!ManualFanActive)
+            return;
+        manualFanCts?.Cancel();
+        FanStateText = "正在恢复自动…";
+        if (manualFanTask is not null)
+            await manualFanTask;
+    }
 
     public bool IsThinkBookSupported => currentIdentity is not null && new ThinkBookProvider(probe).Matches(currentIdentity);
 
@@ -664,7 +792,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (IsBusy || currentIdentity is null)
             return false;
         IsBusy = true;
-        StatusText = $"正在通过 UAC 请求切换至模式 {targetMode}…";
+        StatusText = $"正在切换至模式 {targetMode}…";
         AddLog($"请求模式切换 -> {targetMode}");
         bool success = false;
         try
@@ -770,9 +898,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task SetEnergyAsync(string kind, int targetValue)
     {
-        if (IsBusy || currentIdentity is null)
+        if (IsBusy || !IsThinkBookSupported || currentIdentity is null || !new EnergyRequest(kind, targetValue).IsValid)
             return;
+        int current = kind == "charge" ? EnergyCharge : kind == "key" ? EnergyKey : EnergyNight;
+        if (current == targetValue)
+        {
+            EnergyStatus = "已是当前设置";
+            return;
+        }
         IsBusy = true;
+        EnergyStatus = "正在应用…";
         StatusText = $"正在请求配置 {kind} = {targetValue}…";
         AddLog($"请求能源设置 -> {kind} = {targetValue}");
         try
@@ -825,6 +960,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
+            EnergyStatus = StatusText;
             IsBusy = false;
             await RefreshTelemetryAsync();
         }
@@ -835,8 +971,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (IsBusy || currentIdentity is null)
             return;
         IsBusy = true;
-        StatusText = "正在请求管理员提权读取风扇转速…";
-        AddLog("请求 UAC 提权读取风扇转速…");
+        StatusText = "正在读取风扇转速…";
+        AddLog("通过已授权连接读取风扇转速…");
         try
         {
             var req = new BrokerRequest(BrokerProtocol.Version, Guid.NewGuid().ToString("N"), "read-fans", currentIdentity);
@@ -871,6 +1007,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     public async Task<FanOperationResult> RestoreFanAutoAsync()
     {
+        if (ManualFanActive)
+        {
+            await StopManualFanAsync();
+            return new FanOperationResult(FanStateText == "自动控制指令已发送", FanStateText);
+        }
         if (activeFanTrialCts != null)
         {
             AddLog("正在中止当前风扇试运行并恢复固件自动控制…");

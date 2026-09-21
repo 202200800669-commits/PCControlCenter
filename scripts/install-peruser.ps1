@@ -30,12 +30,10 @@ Write-Output "正在安装 PC Control Center..."
 Write-Output "源目录: $SourceDirectory"
 Write-Output "目标目录: $targetDir"
 
-# 如果已在运行，提示或等待停止
-Get-Process -Name 'pc-control-desktop','pc-control','pc-control-broker' -ErrorAction SilentlyContinue |
-    ForEach-Object {
-        Write-Output "正在停止运行中的进程: $($_.ProcessName) (PID: $($_.Id))"
-        Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-    }
+# 硬件会话必须先自行完成恢复，安装程序不能强制终止它。
+if (Get-Process -Name 'pc-control-desktop','pc-control','pc-control-broker' -ErrorAction SilentlyContinue) {
+    throw '请先恢复自动散热并从托盘退出 PC Control Center，等待控制进程结束后重试安装。'
+}
 
 if (-not (Test-Path -LiteralPath $targetDir)) {
     New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
@@ -85,7 +83,7 @@ if (-not (Test-Path -LiteralPath $uninstallKey)) {
 }
 $props = @{
     DisplayName         = 'PC Control Center'
-    DisplayVersion     = '0.1.0-alpha.14'
+    DisplayVersion     = '0.1.0-alpha.15'
     Publisher           = 'PC Control Center'
     DisplayIcon         = $iconPath
     InstallLocation     = $targetDir

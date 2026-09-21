@@ -36,6 +36,8 @@ public static class EnergySessionRunner
         var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\WindowsPowerShell\v1.0\powershell.exe");
         var start = new ProcessStartInfo(path)
         {
+            // Windows PowerShell must not resolve .NET Framework references from the self-contained app folder.
+            WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System),
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardInput = true,

@@ -18,7 +18,6 @@ public sealed class CoolingView : StackPanel
     private readonly Slider first = new() { Minimum = 1500, Maximum = 5500, Value = 4000, TickFrequency = 100 };
     private readonly Slider second = new() { Minimum = 1500, Maximum = 5500, Value = 4000, TickFrequency = 100 };
     private readonly CheckBox linked = new() { Content = "同步双风扇", IsChecked = true };
-    private readonly ComboBox duration = new() { ItemsSource = new[] { "10 秒", "15 秒", "20 秒", "30 秒" }, SelectedIndex = 1, Width = 112 };
     private readonly DispatcherTimer commit = new() { Interval = TimeSpan.FromMilliseconds(450) };
     private bool syncing;
     public CoolingView(MainViewModel vm)
@@ -59,22 +58,23 @@ public sealed class CoolingView : StackPanel
             if (first.IsMouseCaptureWithin || second.IsMouseCaptureWithin)
                 return;
             commit.Stop();
-            if (!IsVisible || Appearance.Preview || vm.IsBusy || !vm.IsThinkBookSupported)
+            if (!IsVisible || Appearance.Preview || (vm.IsBusy && !vm.ManualFanActive) || !vm.IsThinkBookSupported || !vm.IsAuthorized)
                 return;
-            await vm.RunFanTrialAsync((int)first.Value, (int)second.Value, new[] { 10, 15, 20, 30 }[duration.SelectedIndex]);
+            await vm.SetManualFanTargetAsync((int)first.Value, (int)second.Value);
         };
         IsVisibleChanged += (_, _) => { if (!IsVisible) commit.Stop(); };
         Unloaded += (_, _) => commit.Stop();
-        Children.Add(Card(Stack(Head("手动转速"), Inset(Two(Stack(Text("风扇 1", 12), label1, first), Stack(Text("风扇 2", 12), label2, second))), Two(Stack(linked), Stack(Text("试运行时长", 12), duration)), Text("松开滑块应用 · 到期恢复自动", 12))));
+        Children.Add(Card(Stack(Head("手动转速"), Inset(Two(Stack(Text("风扇 1", 12), label1, first), Stack(Text("风扇 2", 12), label2, second))), linked, Text("松开滑块应用 · 持续保持，直到恢复自动", 12))));
         void Update()
         {
             fans.Text = vm.FanText;
             state.Text = vm.FanStateText;
             modeLabel.Text = vm.PerformanceModeName;
             modes.Select(vm.PerformanceMode == 0 ? 0 : vm.PerformanceMode == 1 ? 1 : vm.PerformanceMode == 3 ? 2 : -1);
-            bool enabled = vm.IsThinkBookSupported && !vm.IsBusy && !Appearance.Preview;
-            modes.IsEnabled = first.IsEnabled = second.IsEnabled = linked.IsEnabled = duration.IsEnabled = refresh.IsEnabled = enabled;
-            restore.IsEnabled = vm.IsThinkBookSupported && !Appearance.Preview;
+            bool authorized = vm.IsThinkBookSupported && vm.IsAuthorized && !Appearance.Preview;
+            modes.IsEnabled = refresh.IsEnabled = authorized && !vm.IsBusy;
+            first.IsEnabled = second.IsEnabled = linked.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive);
+            restore.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive);
         }
         vm.PropertyChanged += (_, _) => Update();
         Update();

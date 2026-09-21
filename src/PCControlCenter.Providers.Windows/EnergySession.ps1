@@ -60,7 +60,7 @@ public static class EnergyBridge {
     }
 }
 '@
-        Add-Type -TypeDefinition $csharp
+        Add-Type -TypeDefinition $csharp -ReferencedAssemblies ([System.ComponentModel.Win32Exception].Assembly.Location)
     }
 
     function Invoke-EnergyRead([string]$k) {

@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using PCControlCenter.Desktop.Services;
 using PCControlCenter.Desktop.ViewModels;
 using PCControlCenter.Desktop.Views;
+using PCControlCenter.Ipc;
 using Forms = System.Windows.Forms;
 using static PCControlCenter.Desktop.Views.UIFactory;
 
@@ -31,6 +32,7 @@ public sealed class MainWindow : Window
     private bool allowExit;
     private string selectedPage = "总览";
     private readonly bool preview;
+    private bool stoppingForClose;
 
     public MainWindow(bool startMinimized = false, bool preview = false)
     {
@@ -61,6 +63,8 @@ public sealed class MainWindow : Window
         SetupViews();
         Navigate("总览");
         Appearance.Changed += OnThemeChanged;
+        if (!preview)
+            AuthorizedBrokerSession.Changed += OnAuthorizationChanged;
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(vm.StatusText))
@@ -84,8 +88,22 @@ public sealed class MainWindow : Window
             timer.Start();
         };
         StateChanged += (_, _) => { if (!preview && WindowState == WindowState.Minimized && vm.MinimizeToTray) Hide(); };
-        Closing += (_, e) =>
+        Closing += async (_, e) =>
         {
+            if (!preview && vm.ManualFanActive)
+            {
+                e.Cancel = true;
+                if (stoppingForClose)
+                    return;
+                stoppingForClose = true;
+                try
+                {
+                    await vm.StopManualFanAsync();
+                }
+                finally { stoppingForClose = false; }
+                Close();
+                return;
+            }
             if (!preview && !allowExit && vm.MinimizeToTray)
             {
                 e.Cancel = true;
@@ -95,7 +113,19 @@ public sealed class MainWindow : Window
             timer.Stop();
             tray?.Dispose();
             Appearance.Changed -= OnThemeChanged;
+            if (!preview)
+            {
+                AuthorizedBrokerSession.Changed -= OnAuthorizationChanged;
+                AuthorizedBrokerSession.Shutdown();
+            }
         };
+    }
+    private void OnAuthorizationChanged()
+    {
+        if (Dispatcher.CheckAccess())
+            vm.NotifyAuthorization();
+        else if (!Dispatcher.HasShutdownStarted)
+            Dispatcher.BeginInvoke(vm.NotifyAuthorization);
     }
     private void OnThemeChanged()
     {
@@ -238,6 +268,32 @@ public sealed class MainWindow : Window
         }
         tools.Children.Add(themes);
         tools.Children.Add(IconButton("refresh", "刷新", async () => { if (!preview) await vm.RefreshTelemetryAsync(); }));
+        var authorizationText = Text(vm.AuthorizationText, 11);
+        authorizationText.VerticalAlignment = VerticalAlignment.Center;
+        authorizationText.MaxWidth = 166;
+        var authorize = new Button { Content = "授权", MinHeight = 28, Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(8, 0, 0, 0) };
+        var decline = new Button { Content = "暂不授权", MinHeight = 28, Padding = new Thickness(8, 3, 8, 3), Margin = new Thickness(4, 0, 0, 0), Background = Brushes.Transparent };
+        bool declined = false;
+        var permissionCard = Inset(Row(authorizationText, authorize, decline));
+        permissionCard.Padding = new Thickness(10, 5, 10, 5);
+        permissionCard.Margin = new Thickness(8, 0, 12, 0);
+        permissionCard.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(permissionCard, Dock.Right);
+        heading.Children.Add(permissionCard);
+        void UpdateAuthorization()
+        {
+            authorizationText.Text = vm.IsAuthorized ? "已授权" : declined ? "未授权" : vm.AuthorizationText;
+            authorize.Visibility = decline.Visibility = vm.IsAuthorized || declined ? Visibility.Collapsed : Visibility.Visible;
+            authorize.IsEnabled = decline.IsEnabled = !vm.AuthorizationPending && !preview;
+        }
+        authorize.Click += async (_, _) => { if (!preview) await vm.AuthorizeAsync(); };
+        decline.Click += (_, _) => { declined = true; UpdateAuthorization(); };
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(vm.IsAuthorized) or nameof(vm.AuthorizationText) or nameof(vm.AuthorizationPending))
+                UpdateAuthorization();
+        };
+        UpdateAuthorization();
         var menu = IconButton("menu", "展开或收起导航", () => SetSidebar(!Appearance.Preferences.SidebarExpanded));
         menu.Margin = new Thickness(0, 0, 14, 0);
         heading.Children.Add(menu);

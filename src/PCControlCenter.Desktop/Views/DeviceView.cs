@@ -22,6 +22,7 @@ public sealed class DeviceView : StackPanel
         var night = new CheckBox { Content = "夜间慢充" };
         var chargeLabel = Text("待读取", 12);
         var keyLabel = Text("待读取", 12);
+        var resultLabel = Text("", 12);
         slider.ValueChanged += (_, _) => { if (syncing) return; value.Text = $"{slider.Value:0}%"; debounce.Stop(); debounce.Start(); };
         debounce.Tick += async (_, _) =>
         {
@@ -44,10 +45,13 @@ public sealed class DeviceView : StackPanel
         night.Click += async (_, _) => { if (!Appearance.Preview) await vm.SetEnergyAsync("night", night.IsChecked == true ? 1 : 0); Update(); };
         Children.Add(Card(Stack(Head("显示与键盘"), Inset(Stack(Text("屏幕亮度", 12), value, slider)), Inset(Stack(Text("键盘背光", 12), backlight, keyLabel)))));
         Children.Add(Card(Stack(Head("电池"), charge, chargeLabel, night)));
+        Children.Add(resultLabel);
         Children.Add(Card(Stack(Head("系统设置"), Row(Link("显示", "ms-settings:display"), Link("声音", "ms-settings:sound"), Link("电源", "ms-settings:powersleep")))));
         Button Link(string label, string uri) => ActionButton(label, () => { if (Appearance.Preview) return; try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { vm.StatusText = "无法打开系统设置"; } });
         void Update()
         {
+            resultLabel.Text = vm.EnergyStatus;
+            resultLabel.Visibility = string.IsNullOrEmpty(vm.EnergyStatus) ? Visibility.Collapsed : Visibility.Visible;
             if (!slider.IsMouseCaptureWithin && !slider.IsKeyboardFocusWithin && !debounce.IsEnabled)
             {
                 syncing = true;
@@ -58,7 +62,7 @@ public sealed class DeviceView : StackPanel
             charge.Select(vm.EnergyCharge);
             backlight.Select(vm.EnergyKey);
             night.IsChecked = vm.EnergyNight == 1;
-            bool supported = vm.IsThinkBookSupported && !vm.IsBusy && !Appearance.Preview;
+            bool supported = vm.IsThinkBookSupported && vm.IsAuthorized && !vm.IsBusy && !Appearance.Preview;
             charge.IsEnabled = backlight.IsEnabled = night.IsEnabled = supported;
             chargeLabel.Text = vm.EnergyCharge switch
             {

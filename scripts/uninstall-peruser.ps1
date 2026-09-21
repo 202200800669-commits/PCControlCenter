@@ -8,9 +8,10 @@ if (-not $Quiet) {
     Write-Output "正在卸载 PC Control Center..."
 }
 
-# 1. 停止相关运行中进程
-Get-Process -Name 'pc-control-desktop','pc-control','pc-control-broker' -ErrorAction SilentlyContinue |
-    ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
+# 1. 先让硬件会话自行恢复，不强制终止控制进程。
+if (Get-Process -Name 'pc-control-desktop','pc-control','pc-control-broker' -ErrorAction SilentlyContinue) {
+    Write-Error '请先恢复自动散热并从托盘退出 PC Control Center，等待控制进程结束后重试卸载。' -ErrorAction Stop
+}
 
 # 2. 清理开机自启动注册表
 Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'PCControlCenter' -ErrorAction SilentlyContinue
@@ -33,8 +34,12 @@ Remove-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PCC
 # 5. 清理程序目录
 $targetDir = Join-Path $env:LOCALAPPDATA 'Programs\PCControlCenter'
 if (Test-Path -LiteralPath $targetDir) {
-    # 异步延时彻底移除安装根目录（避免正在运行本脚本的文件锁占用）
-    Start-Process -FilePath cmd.exe -ArgumentList "/c timeout /t 1 /nobreak >nul & rmdir /s /q `"$targetDir`"" -WindowStyle Hidden
+    $expectedRoot = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs'))
+    $resolvedTarget = (Resolve-Path -LiteralPath $targetDir).Path
+    if ([IO.Path]::GetDirectoryName($resolvedTarget) -ne $expectedRoot -or [IO.Path]::GetFileName($resolvedTarget) -ne 'PCControlCenter' -or (Get-Item -LiteralPath $resolvedTarget).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw '安装目录校验失败，未删除文件。'
+    }
+    Remove-Item -LiteralPath $resolvedTarget -Recurse -Force -ErrorAction Stop
 }
 
 if (-not $Quiet) {

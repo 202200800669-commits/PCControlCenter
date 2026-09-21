@@ -428,6 +428,7 @@ finally { if (File.Exists(reportPath)) File.Delete(reportPath); }
 await FanWorkerTests.RunAllAsync(Check);
 await ModeWorkerTests.RunAllAsync(Check);
 await EnergyWorkerTests.RunAllAsync(Check);
+await LiveControlTests.RunAsync(Check, device);
 await DesktopViewModelTests.RunAllAsync(Check);
 DesktopFeedbackTests.Run(Check, snap);
 await BrightnessScriptTests.RunAllAsync(Check);

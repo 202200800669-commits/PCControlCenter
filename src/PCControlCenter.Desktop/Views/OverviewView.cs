@@ -86,8 +86,8 @@ public sealed class OverviewView : StackPanel
 
         // Metrics Grid 2: Fans & Memory
         var readFansBtn = new Button { Content = "读取转速", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 8, 0, 0) };
-        readFansBtn.IsEnabled = vm.IsThinkBookSupported && !vm.IsBusy;
-        vm.PropertyChanged += (_, _) => readFansBtn.IsEnabled = vm.IsThinkBookSupported && !vm.IsBusy;
+        readFansBtn.IsEnabled = vm.IsThinkBookSupported && vm.IsAuthorized && !vm.IsBusy;
+        vm.PropertyChanged += (_, _) => readFansBtn.IsEnabled = vm.IsThinkBookSupported && vm.IsAuthorized && !vm.IsBusy;
         readFansBtn.Click += async (s, e) => await vm.ReadFansElevatedAsync();
 
         var fansCard = Card(Stack(

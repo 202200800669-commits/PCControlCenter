@@ -24,7 +24,7 @@ try
         return 4;
     stage = 20;
     var request = await BrokerProtocol.ReceiveAsync<BrokerRequest>(pipe, deadline.Token);
-    if (!BrokerProtocol.Valid(request))
+    if (!BrokerProtocol.Valid(request) && !(request.Operation == "authorize" && BrokerProtocol.ValidSessionRequest(request)))
         return 5;
     stage = 30;
     BrokerResponse response = new(BrokerProtocol.Version, request.RequestId, "INTERNAL_ERROR");
@@ -36,10 +36,23 @@ try
             response = new(BrokerProtocol.Version, request.RequestId, "IDENTITY_MISMATCH");
         else
         {
-            if (request.Operation == "read-fans")
+            if (request.Operation == "authorize")
+            {
+                deadline.CancelAfter(Timeout.InfiniteTimeSpan);
+                await BrokerSessionHost.RunAsync(pipe, request);
+                return 0;
+            }
+            else if (request.Operation == "read-fans")
             {
                 var reading = await probe.QueryAsync(ProbeKind.ThinkBookFans, deadline.Token);
                 response = new(BrokerProtocol.Version, request.RequestId, "OK", reading.GetProperty("fan1").GetInt32(), reading.GetProperty("fan2").GetInt32());
+            }
+            else if (request.Operation == "fan-control")
+            {
+                // Live sessions have their own per-message deadline and a separate hardware watchdog.
+                deadline.CancelAfter(Timeout.InfiniteTimeSpan);
+                await FanControlHost.RunAsync(pipe, request);
+                return 0;
             }
             else if (request.Operation is "fan-trial" or "set-mode" or "set-energy")
             {

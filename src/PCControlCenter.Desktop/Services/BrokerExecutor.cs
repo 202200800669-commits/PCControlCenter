@@ -106,7 +106,7 @@ public sealed class RealBrokerExecutor : IBrokerExecutor
         BrokerSessionTracker.RecordStart(request.RequestId);
         try
         {
-            var resp = await BrokerClient.ExecuteAsync(request, ct);
+            var resp = await AuthorizedBrokerSession.ExecuteAsync(request, ct);
             var recovery = resp.Receipt?.Recovery ?? resp.ModeReceipt?.Recovery ?? resp.EnergyReceipt?.Recovery;
             var code = resp.Receipt?.Code ?? resp.ModeReceipt?.Code ?? resp.EnergyReceipt?.Code;
             var state = resp.Code == "OK" && RecoveryOutcome.IsConfirmed(recovery, code)

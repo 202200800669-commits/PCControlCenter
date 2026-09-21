@@ -11,6 +11,17 @@ public sealed class SettingsView : StackPanel
     public event Action? RequestExit;
     public SettingsView(MainViewModel vm)
     {
+        var permissionStatus = Text(vm.AuthorizationText, 12);
+        var permissionButton = ActionButton("手动授权", async () => { if (!Appearance.Preview) await vm.AuthorizeAsync(); });
+        void UpdatePermission()
+        {
+            permissionStatus.Text = vm.AuthorizationText;
+            permissionButton.Content = vm.IsAuthorized ? "已授权" : "手动授权";
+            permissionButton.IsEnabled = !vm.IsAuthorized && !vm.AuthorizationPending && !Appearance.Preview;
+        }
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(vm.IsAuthorized) or nameof(vm.AuthorizationText) or nameof(vm.AuthorizationPending)) UpdatePermission(); };
+        UpdatePermission();
+        Children.Add(Card(Stack(Head("控制权限"), Row(permissionStatus, permissionButton))));
         var choices = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
         foreach (var p in Appearance.Palettes)
         {

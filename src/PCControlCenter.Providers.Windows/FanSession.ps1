@@ -5,6 +5,14 @@ $inputReader=New-Object IO.StreamReader([Console]::OpenStandardInput())
 $stop=$inputReader.ReadLineAsync()
 $result=@{Code='NOT_STARTED';Recovery='NOT_NEEDED';ObservedFan1=$null;ObservedFan2=$null;AfterFan1=$null;AfterFan2=$null}
 $touched=$false;$locked=$false;$mutex=$null
+$leaseSeconds=10
+function PublishFanState {
+ $result.ObservedFan1=ReadFanFeature 0x04030001
+ $result.ObservedFan2=ReadFanFeature 0x04030002
+ if($result.ObservedFan1 -lt 0 -or $result.ObservedFan1 -gt 10000 -or $result.ObservedFan2 -lt 0 -or $result.ObservedFan2 -gt 10000){throw 'INVALID_READING'}
+ $result|ConvertTo-Json -Compress
+ [Console]::Out.Flush()
+}
 function ReadFanFeature([uint32]$id) {
  $v=Invoke-CimMethod -InputObject $script:fan -MethodName GetFeatureValue -Arguments @{IDs=$id} -OperationTimeoutSec 3
  if($v.ReturnValue -ne $true -or $null -eq $v.value){throw 'READ_FAILED'}
@@ -44,7 +52,33 @@ try {
  $expected=0;if($mode -eq 'full'){$expected=1}
  if((ReadFanFeature 0x04020000) -ne $expected){throw 'OVERRIDE_MISMATCH'}
  $result.Code='COMPLETED'
- while($clock.Elapsed.TotalSeconds -lt $seconds) {
+ if($continuous) {
+  if($mode -ne 'manual'){throw 'INVALID_MODE'}
+  $result.Code='RUNNING'
+  PublishFanState
+  $lastPulse=[DateTime]::UtcNow
+  while($true) {
+   if(([DateTime]::UtcNow-$lastPulse).TotalSeconds -ge $leaseSeconds){$result.Code='HEARTBEAT_EXPIRED';break}
+   if($stop.IsCompleted) {
+    $line=$stop.GetAwaiter().GetResult()
+    if($null -eq $line){$result.Code='INTERRUPTED';break}
+    if($line -notmatch '^([0-9]{4}),([0-9]{4})$'){throw 'INVALID_UPDATE'}
+    $next1=[int]$Matches[1];$next2=[int]$Matches[2]
+    if($next1 -lt 1500 -or $next1 -gt 5500 -or $next2 -lt 1500 -or $next2 -gt 5500){throw 'INVALID_UPDATE'}
+    # Refresh only on a valid message from the client; no autonomous keep-alive.
+    $lastPulse=[DateTime]::UtcNow
+    if($next1 -ne $rpm1 -or $next2 -ne $rpm2) {
+     WriteFanFeature 0x04030001 $next1
+     WriteFanFeature 0x04030002 $next2
+     $rpm1=$next1;$rpm2=$next2
+    }
+    PublishFanState
+    $stop=$inputReader.ReadLineAsync()
+   }
+   Start-Sleep -Milliseconds 100
+  }
+ }
+ while(!$continuous -and $clock.Elapsed.TotalSeconds -lt $seconds) {
   if($stop.IsCompleted){$result.Code='INTERRUPTED';break}
   $result.ObservedFan1=ReadFanFeature 0x04030001
   $result.ObservedFan2=ReadFanFeature 0x04030002
