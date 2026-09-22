@@ -79,6 +79,34 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private CancellationTokenSource? manualFanCts;
     private Task? manualFanTask;
+    private readonly ManualFanTimer manualTimer;
+    public int ManualDurationMinutes
+    {
+        get; private set;
+    }
+    public string ManualTimerText
+    {
+        get
+        {
+            if (ManualFanActive && manualTimer.Remaining is TimeSpan remaining)
+            {
+                int seconds = (int)Math.Ceiling(remaining.TotalSeconds);
+                return $"剩余 {seconds / 60:00}:{seconds % 60:00} · 到期恢复自动";
+            }
+            return ManualDurationMinutes == 0 ? "持续运行" : "到期恢复自动";
+        }
+    }
+    public void SetManualDurationMinutes(int minutes)
+    {
+        if (minutes is not (0 or 1 or 5 or 10 or 15 or 30 or 60 or 120) || hardwareTransition ||
+            manualFanCts?.IsCancellationRequested == true || minutes == ManualDurationMinutes)
+            return;
+        ManualDurationMinutes = minutes;
+        if (ManualFanActive && manualFanCts is not null)
+            manualTimer.Start(manualFanCts, minutes == 0 ? null : TimeSpan.FromMinutes(minutes));
+        Notify(nameof(ManualDurationMinutes));
+        Notify(nameof(ManualTimerText));
+    }
     private (int First, int Second) manualTarget;
     private bool manualFanActive;
     private bool manualRecoveryConfirmed;
@@ -141,12 +169,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         finally { AuthorizationPending = false; }
     }
-    public Task SetManualFanTargetAsync(int first, int second)
+    public Task SetManualFanTargetAsync(int first, int second) => StartManualFanAsync(first, second);
+    private Task StartManualFanAsync(int first, int second, bool resuming = false, long? deadline = null)
     {
         if (hardwareTransition || !new FanTrial("manual", first, second, 5).IsValid || !IsThinkBookSupported || !IsAuthorized)
             return Task.CompletedTask;
         if (ManualFanActive)
         {
+            if (manualFanCts?.IsCancellationRequested == true)
+                return Task.CompletedTask;
             manualTarget = (first, second);
             return Task.CompletedTask;
         }
@@ -154,6 +185,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return Task.CompletedTask;
         manualTarget = (first, second);
         manualFanCts = new CancellationTokenSource();
+        if (resuming)
+            manualTimer.Resume(manualFanCts, deadline);
+        else
+            manualTimer.Start(manualFanCts, ManualDurationMinutes == 0 ? null : TimeSpan.FromMinutes(ManualDurationMinutes));
         manualRecoveryConfirmed = false;
         ManualFanActive = true;
         IsBusy = true;
@@ -171,10 +206,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 Fan1Rpm = state.Fan1;
                 Fan2Rpm = state.Fan2;
                 FanText = $"{state.Fan1?.ToString() ?? "—"} / {state.Fan2?.ToString() ?? "—"} RPM";
-                FanStateText = $"持续手动 · 目标 {manualTarget.First} / {manualTarget.Second} RPM";
+                FanStateText = $"手动控制 · 目标 {manualTarget.First} / {manualTarget.Second} RPM";
+                Notify(nameof(ManualTimerText));
             }, ct);
             manualRecoveryConfirmed = response.Receipt?.Recovery == "AUTO_COMMANDS_SENT_OVERRIDE_OFF";
-            FanStateText = manualRecoveryConfirmed ? "自动控制指令已发送" : "手动控制已结束 · 恢复未确认";
+            FanStateText = manualRecoveryConfirmed
+                ? manualTimer.IsExpired(manualTimer.Deadline) ? "定时结束 · 自动控制指令已发送" : "自动控制指令已发送"
+                : "手动控制已结束 · 恢复未确认";
             StatusText = FanStateText;
             AddLog($"风扇持续控制结束: {response.Receipt?.Code ?? response.Code}, {response.Receipt?.Recovery ?? "UNCONFIRMED"}");
         }
@@ -188,9 +226,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
+            manualTimer.Clear();
             manualFanCts?.Dispose();
             manualFanCts = null;
             ManualFanActive = false;
+            Notify(nameof(ManualTimerText));
             IsBusy = false;
             lastErrorTimestamp = DateTime.UtcNow;
         }
@@ -214,6 +254,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return false;
         bool hadManual = ManualFanActive;
         var previousTarget = manualTarget;
+        var previousDeadline = manualTimer.Deadline;
         hardwareTransition = true;
         controlRevision++;
         resumeManualAllowed = resumeManual && hadManual;
@@ -237,8 +278,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         finally
         {
             hardwareTransition = false;
-            if (canResume && resumeManualAllowed && IsAuthorized && !IsBusy)
-                await SetManualFanTargetAsync(previousTarget.First, previousTarget.Second);
+            if (canResume && resumeManualAllowed && IsAuthorized && !IsBusy && !manualTimer.IsExpired(previousDeadline))
+                await StartManualFanAsync(previousTarget.First, previousTarget.Second, resuming: true, deadline: previousDeadline);
             resumeManualAllowed = false;
             Notify(nameof(HardwareTransition));
         }
@@ -549,12 +590,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
     }
 
-    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor, IManualFanSession? manualFanSession = null, IReadOnlyProbe? telemetryProbe = null, Func<CancellationToken, Task<DeviceControlReadings>>? readControls = null)
+    public MainViewModel(IBrightnessService brightnessService, IProfileStorage profileStorage, IBrokerExecutor brokerExecutor, IManualFanSession? manualFanSession = null, IReadOnlyProbe? telemetryProbe = null, Func<CancellationToken, Task<DeviceControlReadings>>? readControls = null, TimeProvider? timeProvider = null)
     {
         this.brightnessService = brightnessService;
         this.profileStorage = profileStorage;
         this.brokerExecutor = brokerExecutor;
         this.manualFanSession = manualFanSession ?? new ManualFanSession();
+        manualTimer = new ManualFanTimer(timeProvider);
         probe = telemetryProbe ?? new WindowsProbe();
         this.readControls = readControls ?? DeviceControlReadings.ReadAsync;
         for (int i = 0; i < 60; i++)

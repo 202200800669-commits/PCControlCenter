@@ -83,7 +83,7 @@ if (-not (Test-Path -LiteralPath $uninstallKey)) {
 }
 $props = @{
     DisplayName         = 'PC Control Center'
-    DisplayVersion     = '0.1.0-alpha.17'
+    DisplayVersion     = '0.1.0-alpha.18'
     Publisher           = 'PC Control Center'
     DisplayIcon         = $iconPath
     InstallLocation     = $targetDir

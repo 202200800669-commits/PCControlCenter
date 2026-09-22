@@ -28,9 +28,9 @@ static class HardwareHandoffTests
             return new(2, request.RequestId, "OK", Receipt: new("INTERRUPTED", Confirm ? "AUTO_COMMANDS_SENT_OVERRIDE_OFF" : "UNCONFIRMED"));
         }
     }
-    static MainViewModel Create(FakeManual live, FakeBrokerExecutor broker)
+    static MainViewModel Create(FakeManual live, FakeBrokerExecutor broker, TimeProvider? clock = null)
     {
-        var vm = new MainViewModel(new FakeBrightnessService(), new FakeProfileStorage(), broker, live);
+        var vm = new MainViewModel(new FakeBrightnessService(), new FakeProfileStorage(), broker, live, timeProvider: clock);
         vm.SetIdentityForTesting(new("LENOVO", "21R0", "ThinkBook 16p G6 IAX", "R2CN57WW", "Windows"));
         vm.EnergyKey = 0;
         return vm;
@@ -44,6 +44,7 @@ static class HardwareHandoffTests
     }
     public static async Task RunAsync(Action<bool, string> check)
     {
+        await TestTimersAsync(check);
         var live = new FakeManual();
         var broker = new FakeBrokerExecutor();
         bool wroteAfterStop = false;
@@ -91,5 +92,70 @@ static class HardwareHandoffTests
         check(SystemMetrics.DescribeBatteryState(Forms.BatteryChargeStatus.High, Forms.PowerLineStatus.Online, .8f) == "已接电 · 未充电", "AC at a charge limit is not mislabeled as charging");
         check(SystemMetrics.DescribeBatteryState(Forms.BatteryChargeStatus.Charging, Forms.PowerLineStatus.Online, .8f) == "正在充电", "charging flag displays actual charging state");
         check(SystemMetrics.DescribeBatteryState(Forms.BatteryChargeStatus.NoSystemBattery, Forms.PowerLineStatus.Online, 1f) == "未检测到电池", "desktop without battery is not shown as a full battery");
+    }
+
+    private static async Task TestTimersAsync(Action<bool, string> check)
+    {
+        var clock = new ManualTestClock();
+        var live = new FakeManual();
+        var broker = new FakeBrokerExecutor { Handler = (r, _) => Task.FromResult(Energy(r)) };
+        var vm = Create(live, broker, clock);
+        vm.SetManualDurationMinutes(1);
+        check(live.Targets.Count == 0, "selecting a duration alone never starts hardware control");
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        clock.Advance(30);
+        await vm.SetManualFanTargetAsync(4500, 4700);
+        check(vm.ManualTimerText.Contains("00:30"), "adjusting RPM preserves the original countdown");
+        clock.Advance(30);
+        await Until(() => !vm.ManualFanActive);
+        check(live.Stops == 1 && vm.FanStateText.Contains("定时结束"), "timer expiry stops manual session and reports confirmed automatic recovery");
+
+        vm.SetManualDurationMinutes(0);
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        clock.Advance(7200);
+        check(vm.ManualFanActive && live.Stops == 1, "continuous option remains active without an expiry timer");
+        vm.SetManualDurationMinutes(5);
+        clock.Advance(30);
+        vm.SetManualDurationMinutes(1);
+        clock.Advance(59);
+        check(vm.ManualFanActive && vm.ManualTimerText.Contains("00:01"), "changing duration during a session starts the newly selected countdown");
+        vm.SetManualDurationMinutes(0);
+        clock.Advance(600);
+        check(vm.ManualFanActive && live.Stops == 1, "switching to continuous cancels the previous expiry timer");
+        await vm.StopManualFanAsync();
+
+        vm.SetManualDurationMinutes(1);
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        clock.Advance(15);
+        broker.Handler = (r, _) => { clock.Advance(10); return Task.FromResult(Energy(r)); };
+        await vm.SetEnergyAsync("key", 1);
+        check(vm.ManualFanActive && vm.ManualTimerText.Contains("00:35"), "energy handoff resumes only the original remaining timer budget");
+        clock.Advance(35);
+        await Until(() => !vm.ManualFanActive);
+        check(vm.FanStateText.Contains("定时结束"), "resumed session expires at its original deadline");
+
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        int starts = live.Targets.Count;
+        broker.Handler = (r, _) => { clock.Advance(61); return Task.FromResult(Energy(r)); };
+        await vm.SetEnergyAsync("key", 2);
+        check(!vm.ManualFanActive && live.Targets.Count == starts, "expiry during hardware handoff never restarts manual cooling");
+        vm.SetManualDurationMinutes(-1);
+        vm.SetManualDurationMinutes(999);
+        check(vm.ManualDurationMinutes == 1, "invalid duration cannot replace the selected timer");
+
+        live.Confirm = false;
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        clock.Advance(60);
+        await Until(() => !vm.ManualFanActive);
+        check(vm.FanStateText.Contains("未确认") && !vm.FanStateText.Contains("已发送"), "unconfirmed recovery after timer expiry never claims success");
+        live.Confirm = true;
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        await vm.StopManualFanAsync();
+        vm.SetManualDurationMinutes(0);
+        await vm.SetManualFanTargetAsync(4000, 4200);
+        int stops = live.Stops;
+        clock.Advance(600);
+        check(vm.ManualFanActive && live.Stops == stops, "stopped session timer cannot cancel a later session");
+        await vm.StopManualFanAsync();
     }
 }

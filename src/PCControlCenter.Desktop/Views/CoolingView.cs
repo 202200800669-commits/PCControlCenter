@@ -64,11 +64,27 @@ public sealed class CoolingView : StackPanel
         };
         IsVisibleChanged += (_, _) => { if (!IsVisible) commit.Stop(); };
         Unloaded += (_, _) => commit.Stop();
-        Children.Add(Card(Stack(Head("手动转速"), Inset(Two(Stack(Text("风扇 1", 12), label1, first), Stack(Text("风扇 2", 12), label2, second))), linked, Text("松开滑块应用 · 持续保持，直到恢复自动", 12))));
+        int[] durations = [0, 1, 5, 10, 15, 30, 60, 120];
+        var duration = new ComboBox { MinWidth = 156, HorizontalAlignment = HorizontalAlignment.Left };
+        foreach (int minutes in durations)
+            duration.Items.Add(minutes == 0 ? "持续运行" : $"{minutes} 分钟");
+        duration.SelectedIndex = Array.IndexOf(durations, vm.ManualDurationMinutes);
+        System.Windows.Automation.AutomationProperties.SetName(duration, "手动转速运行时长");
+        duration.SelectionChanged += (_, _) =>
+        {
+            if (duration.SelectedIndex >= 0)
+                vm.SetManualDurationMinutes(durations[duration.SelectedIndex]);
+        };
+        var countdown = Text(vm.ManualTimerText, 12);
+        Children.Add(Card(Stack(Head("手动转速"), Inset(Two(Stack(Text("风扇 1", 12), label1, first), Stack(Text("风扇 2", 12), label2, second))),
+            Two(Stack(linked, Text("松开滑块应用", 12)), Stack(Text("运行时长", 12), duration, countdown)))));
         void Update()
         {
             fans.Text = vm.FanText;
             state.Text = vm.FanStateText;
+            countdown.Text = vm.ManualTimerText;
+            duration.IsEnabled = vm.CanSwitchHardware;
+            duration.SelectedIndex = Array.IndexOf(durations, vm.ManualDurationMinutes);
             modeLabel.Text = vm.PerformanceModeName;
             modes.Select(vm.PerformanceMode == 0 ? 0 : vm.PerformanceMode == 1 ? 1 : vm.PerformanceMode == 3 ? 2 : -1);
             bool authorized = vm.IsThinkBookSupported && vm.IsAuthorized && !Appearance.Preview;
@@ -78,7 +94,8 @@ public sealed class CoolingView : StackPanel
             restore.IsEnabled = authorized && (!vm.IsBusy || vm.ManualFanActive || vm.HardwareTransition);
         }
         ViewRefresh.Subscribe(this, vm, Update, nameof(vm.FanText), nameof(vm.FanStateText), nameof(vm.PerformanceMode),
-            nameof(vm.IsBusy), nameof(vm.ManualFanActive), nameof(vm.IsAuthorized), nameof(vm.HardwareTransition), nameof(vm.DeviceTitle));
+            nameof(vm.IsBusy), nameof(vm.ManualFanActive), nameof(vm.IsAuthorized), nameof(vm.HardwareTransition), nameof(vm.DeviceTitle),
+            nameof(vm.ManualDurationMinutes), nameof(vm.ManualTimerText));
         Update();
     }
 }
